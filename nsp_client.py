@@ -16,7 +16,7 @@ class NspClientSingleton:
     initialized = False
 
     """
-    Though not desirable, we must provide defaults for all args for unpickling. 
+    Though not desirable, we must provide defaults for all variables for unpickling. 
     Therefore, we must also protect from server=None 
     """
     def __new__(cls, server=None, username='admin', password='NokiaNsp1!'):
@@ -168,8 +168,8 @@ class NspClientSingleton:
     Returns: {}. Keys: 1. 'port_id': str e.g. '1/1/c2/1',
                        2. 'ip_addr': str[] e.g. ['10.41.1.1/30', 'FC10:41:1::1/126']
     """
-    def get_l3vpn_interface_details(self, ne_id: str, svc_name: str, if_name: str) -> {}:
-        url = f"{self.server_url}/restconf/data/nsp-service-intent:intent-base/intent={svc_name},vprn/intent-specific-data/vprn:vprn/site-details/site={ne_id},{svc_name}/interface-details/interface={if_name}"
+    def get_l3vpn_interface_details(self, site_id: str, svc_name: str, if_name: str) -> {}:
+        url = f"{self.server_url}/restconf/data/nsp-service-intent:intent-base/intent={svc_name},vprn/intent-specific-data/vprn:vprn/site-details/site={site_id},{svc_name}/interface-details/interface={if_name}"
 
         log.debug(f"Request: {url}")
         response = requests.get(
@@ -187,34 +187,8 @@ class NspClientSingleton:
             ipv4_and_ipv6_addr.append(if_primary_ipv4_address_ctx['address'] + '/' + str(if_primary_ipv4_address_ctx['prefix-length']))
             #TODO: IPv6
             if_details['ip_addr'] = ipv4_and_ipv6_addr
-        else:
-            log.error(f"Failed:{response.status_code}, {response.text}")
 
         return if_details
-
-    def get_ne_details(self, ne_id: str) -> {}:
-        url = f"{self.server_url}/restconf/operations/nsp-inventory:find"
-        data = f'{{"nsp-inventory:input": {{"xpath-filter": "/nsp-equipment:network/network-element[ne-id=\'{ne_id}\']", "depth": "2"}}}}'
-
-        log.debug(f"Request: {url}, Data: {data}")
-        response = requests.post(
-            url,
-            data=data,
-            verify=False,  # Skip certificate verification
-            headers=self.headers_dict)
-
-        ne_details = {}
-        if response.status_code == 200:
-            log.debug(f"Response: {response.text}")
-            response_dict = json.loads(response.text)
-            ne_data = response_dict['nsp-inventory:output']['data'][0]
-            ne_details['version'] = ne_data['version']
-            ne_details['product'] = ne_data['product']
-            ne_details['type'] = ne_data['type']
-        else:
-            log.error(f"Failed:{response.status_code}, {response.text}")
-
-        return ne_details
 
 
     def unixtime_ms_to_currenttime(self, unixtime_ms) -> str:
@@ -244,8 +218,7 @@ if __name__ == '__main__':
     #nsp_client.renew_subscription()
     #kafka_client = KafkaClient(server='135.121.156.104', topic_id=subscription_details_dict['topic_id'])
     #kafka_client.connect()
-    #print(nsp_client.get_l3vpn_interface_details('2001::225', '411', 'toCE'))
-    print(nsp_client.get_ne_details('38.120.234.239'))
-    print(nsp_client.get_ne_details('2001::225'))
+    print(nsp_client.get_l3vpn_interface_details('2001::225', '411', 'toCE'))
+
 
 

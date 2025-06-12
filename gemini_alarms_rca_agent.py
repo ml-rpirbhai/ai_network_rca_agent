@@ -8,10 +8,10 @@ from google.api_core import retry
 
 from multiprocessing import Queue
 import time
+import typing_extensions as typing
 
 from anonymizer import AnonymizerSingleton
 from nsp_client import NspClientSingleton
-from rag import RagSingleton
 
 with open('config/logger.yaml', 'r') as stream:
     logger_config = yaml.load(stream, Loader=yaml.FullLoader)
@@ -27,22 +27,19 @@ class GenAISingleton:
     __instance = None
     __initialized = False
 
-    def __new__(cls):
+    def __new__(cls, nsp_client):
         if cls.__instance is None:
             cls.__instance = super(GenAISingleton, cls).__new__(cls)
         return cls.__instance
 
-    def __init__(self):
+    def __init__(self, nsp_client):
         if not self.__initialized:
             log.info(f"genai.__version__: {genai.__version__}")
             self.is_retriable = lambda e: (isinstance(e, genai.errors.APIError) and e.code in {429, 503})
             self.__client = genai.Client(api_key=GOOGLE_API_KEY)
-            nsp_client_instance = NspClientSingleton.instance
             self.anonymizer = AnonymizerSingleton()
-            rag_instance = RagSingleton(self)
-            self.tools = [nsp_client_instance.get_l3vpn_interface_details,
-                          nsp_client_instance.get_ne_details,
-                          rag_instance.query_db]
+            self.tools = [nsp_client.get_l3vpn_interface_details]
+
 
             self.__initialized = True
 
@@ -64,11 +61,8 @@ class GenAISingleton:
                            a) The root-cause of the service-interface failure to the port failure by using a tool to determine whether the service-interface is configured on the port; and
                            b) The root-cause of the eBGP peer failure to the port failure by using a tool to determine whether the peer IP is on the interface's subnet. 
                            Tools:
-                           * Use nsp_client_instance.get_l3vpn_interface_details to retrieve the port-parent and IP addresses of an L3VPN interface. 
-                             ** If the service-name is not available, you can assume that service-name = service-id. 
-                           * Use nsp_client_instance.get_ne_details to retrieve an NE instance's vendor, chassis and OS details.
-                           * Use rag_instance.query_db to retrieve useful references information about how to interpret an NE instance's vendor/OS/version alarms: 
-                             ** Simply provide the vendor, OS type and version in the query (don't provide any other details).                     
+                           - Use NspClientSingleton.instance.get_l3vpn_interface_details to retrieve the port-parent and IP addresses of an L3VPN interface. 
+                             * If the service-name is not available, you can assume that service-name = service-id.                    
                         """
                         )
 
@@ -118,6 +112,8 @@ class GenAISingleton:
 
         # Clean up the text string so that we return proper-JSON-format
         return chat.send_message(prompt + alarms_feed).text.strip('`').replace('json', '', 1)
+        #return chat.send_message(f"{alarms_feed} Did L3VPN interface 'toCE' fail because port '1/1/c2/1' failed?")
+        #return chat.send_message(f"{alarms_feed} What is the root-cause of 'toCE' failure?")
 
     def drain_queue(self, q: Queue):
         messages = []
@@ -172,9 +168,9 @@ class GenAISingleton:
 Test
 """
 if __name__ == '__main__':
-    my_nsp_client = NspClientSingleton(server='135.121.156.104')
-    my_nsp_client.authenticate()  # Get Token
-    gen_ai = GenAISingleton()
+    nsp_client = NspClientSingleton(server='135.121.156.104')
+    nsp_client.authenticate()  # Get Token
+    gen_ai = GenAISingleton(nsp_client)
 
     alarms_feed_1 = \
 """
