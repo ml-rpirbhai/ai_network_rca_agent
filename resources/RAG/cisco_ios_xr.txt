@@ -1,0 +1,3 @@
+For alarms raised on Cisco IOS-XR NEs:
+Alarms tagged with 'equipment:NetworkElement' FDNs actually may not be network-element-level alarms: These are
+alarms raised on more granular objects on the NE. The additional-text field will provide details on the object specifics.
