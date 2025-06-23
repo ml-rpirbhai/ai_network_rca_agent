@@ -6,7 +6,7 @@ import yaml
 
 log = logging.getLogger(__name__)
 
-REGEXP_CONFIG_YML_PATH = '../config/anonymizer.yaml'
+REGEXP_CONFIG_YML_PATH = 'config/anonymizer.yaml'
 
 class AnonymizerSingleton:
     __instance = None
