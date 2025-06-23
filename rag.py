@@ -18,18 +18,21 @@ class RagSingleton:
     db = None
     __embed_fn = None
 
-    def __new__(cls, genai_client):
+    def __new__(cls, genai_client=None):
         if cls.instance is None:
             cls.instance = super(RagSingleton, cls).__new__(cls)
         return cls.instance
 
-    def __init__(self, genai_client):
+    def __init__(self, genai_client=None):
         if not self.__initialized:
             if genai_client is not None:
                 self.__genai_client = genai_client
             else:
-                print("Error: Requires genai_client")
-                return
+                print("Instantiating genai client ...")
+                with open('config/conf.yaml', 'r') as stream:
+                    conf = yaml.load(stream, Loader=yaml.FullLoader)
+                GOOGLE_API_KEY = conf['google_gemini_api_key']
+                self.__genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
             # Load the documents
             documents = []
@@ -72,6 +75,7 @@ class RagSingleton:
             passages = ""
             for passage in all_passages:
                 passages += f"REFERENCE: {passage.replace("\n", " ")}\n"
+            print(passages)
         else:
             print("No relevant results found.")
 
