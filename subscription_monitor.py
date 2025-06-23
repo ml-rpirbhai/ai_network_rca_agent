@@ -3,7 +3,7 @@ from enum import Enum
 import logging
 from threading import Thread
 
-from v3.nsp_client import NspClientSingleton
+from nsp_client import NspClientSingleton
 
 log = logging.getLogger(__name__)
 

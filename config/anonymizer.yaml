@@ -1,0 +1,9 @@
+regexps:  # Regexps to anonymize
+  - 'sim\S+'  # NE name
+  - '(?:(?:25[0-5]|2[0-4]\d|1?\d{1,2})\.){3}(?:25[0-5]|2[0-4]\d|1?\d{1,2})'  # IPv4 address
+  - '(?:[A-Fa-f0-9]{1,4}:){6}[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,6}:[A-Fa-f0-9]{1,4}|(?:[A-Fa-f0-9]{1,4}:){1,7}:|:(?::[A-Fa-f0-9]{1,4}){1,7}|(?:[A-Fa-f0-9]{1,4}:){1,4}:(?::[A-Fa-f0-9]{1,4}){1,4}'  # IPv6 address
+  - 'ASN (\d+)'
+  - 'service-id=''(\d+)'''
+  - 'port-id=''\S+'''
+  - 'Interface \S+'
+  - 'interface-name=''\S+'''
