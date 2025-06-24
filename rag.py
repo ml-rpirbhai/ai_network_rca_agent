@@ -65,7 +65,7 @@ class RagSingleton:
         [all_passages] = result["documents"]
         [distances] = result["distances"]
 
-        similarity_threshold = 0.75  # Adjust this threshold as needed.
+        similarity_threshold = 0.8  # Adjust this threshold as needed.
 
         distance = distances[0]
         print(f"distance: {distance}")
