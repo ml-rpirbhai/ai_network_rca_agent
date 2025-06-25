@@ -1,6 +1,10 @@
+import logging
 import xmltodict
+
 from ncclient import manager
 from nsp_client import NspClientSingleton
+
+log = logging.getLogger(__name__)
 
 """
 * Called by Gemini Agent *
@@ -36,7 +40,7 @@ class Client:
                      </snmp-agent-oper:snmp></filter>"""
 
         response = self._get(filter)
-        print(response)
+        log.debug(response)
         return xmltodict.parse(response.xml)['rpc-reply']['data']['snmp']['interfaces']['interface']['name']
 
 

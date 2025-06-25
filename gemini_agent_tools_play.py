@@ -4,7 +4,7 @@ from google.genai import types
 from nsp_client import NspClientSingleton
 from rag import RagSingleton
 
-GOOGLE_API_KEY='AIzaSyDzYx5EfjvMwIsH4rEsk57HpChDm02ndKs'
+GOOGLE_API_KEY='AIzaSyBx6vUjcxQheUOvVzUAnWE7ZzgqaqHqT7g'
 genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 nsp_client = NspClientSingleton(server='135.121.156.104')
@@ -26,7 +26,7 @@ Use RagSingleton.instance.query_db to retrieve useful references information abo
 
 # Start a chat with automatic function calling enabled.
 chat = genai_client.chats.create(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     config=types.GenerateContentConfig(
         system_instruction=instruction,
         tools=tools,

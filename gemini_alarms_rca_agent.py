@@ -146,7 +146,7 @@ class GenAISingleton:
             """
             We will use 2 LLM clients: One for LangGraph, and another for the final prompt -> RCA
             """
-            self.__langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",
+            self.__langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
                                                           api_key=GOOGLE_API_KEY)
             # Attach the tools to the model so that it knows what it can call
             self.langgraph_tools = [self.lg_get_ne_details, self.lg_query_db, self.lg_get_cisco_ios_xr_interface_name]
@@ -181,10 +181,9 @@ class GenAISingleton:
         for tool_call in tool_msg.tool_calls:
             #Sleep for 1 sec to avoid hitting rate-limits on Gemini free-tier
             time.sleep(1)
+            log.debug(tool_call)
 
             if tool_call["name"] == "lg_get_ne_details":
-
-                print(tool_call)
                 ne_id = tool_call["args"]["ne_id"]
                 response = self.__nsp_client.get_ne_details(ne_id)
                 # Update the order record ne_details
@@ -193,19 +192,17 @@ class GenAISingleton:
                 order["ne_details"][ne_id] = ne_details_map
 
             elif tool_call["name"] == "lg_query_db":
-
-                print(tool_call)
                 query = tool_call["args"]["query"]
                 response = self.__rag_client.query_db(query)
                 order["references"][query] = response
 
                 if response is None:
                     flow_completed = True
-                else:
+                #else:
                     # Inject the RAG as a message Gemini can see in the next turn
-                    outbound_msgs.append(
-                        HumanMessage(content=f"NE documentation for {query}:\n{response}")
-                    )
+                #    outbound_msgs.append(
+                #        HumanMessage(content=f"NE documentation for {query}:\n{response}")
+                #    )
 
             elif tool_call["name"] == "lg_get_cisco_ios_xr_interface_name":
                 ne_id = tool_call["args"]["ne_id"]
@@ -230,6 +227,7 @@ class GenAISingleton:
                 )
             )
 
+        log.debug(f"messages: {outbound_msgs}, order: {order}, finished: {flow_completed}")
         return {"messages": outbound_msgs, "order": order, "finished": flow_completed}
 
     def __maybe_route_to_tools(self, state: OrderState) -> Literal["tools", "__end__"]:
@@ -268,11 +266,11 @@ class GenAISingleton:
                                              system_instruction=INSTRUCTIONS)
 
         # Start a chat with automatic function calling enabled.
-        chat = self.__llm.chats.create(model="gemini-2.0-flash",
+        chat = self.__llm.chats.create(model="gemini-2.5-flash",
                                           config=config)
 
         final_prompt = f"{PROMPT}\n\n{alarms_feed}\n\nNE DETAILS + DOCS:\n{state['order']}"
-        print(final_prompt)
+        log.info(f"final_prompt: {final_prompt}")
 
         # Invoke. Clean up the text string so that we return proper-JSON-format
         return chat.send_message(final_prompt + alarms_feed).text.strip('`').replace('json', '', 1)
