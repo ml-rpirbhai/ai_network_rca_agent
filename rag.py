@@ -1,3 +1,5 @@
+import logging
+
 import chromadb
 from chromadb import Documents, EmbeddingFunction, Embeddings
 from google import genai
@@ -7,6 +9,8 @@ from google.api_core import retry
 import os
 from os.path import join as file_path
 import yaml
+
+log = logging.getLogger(__name__)
 
 DOCS_DIR = 'resources/RAG'
 
@@ -28,7 +32,7 @@ class RagSingleton:
             if genai_client is not None:
                 self.__genai_client = genai_client
             else:
-                print("Instantiating genai client ...")
+                log.debug("Instantiating genai client ...")
                 with open('config/conf.yaml', 'r') as stream:
                     conf = yaml.load(stream, Loader=yaml.FullLoader)
                 GOOGLE_API_KEY = conf['google_gemini_api_key']
@@ -46,12 +50,12 @@ class RagSingleton:
             chroma_client = chromadb.Client()
             self.db = chroma_client.get_or_create_collection(name=RagSingleton.DB_NAME, embedding_function=self.__embed_fn)
             self.db.add(documents=documents, ids=[str(i) for i in range(len(documents))])
-            print(f"db.count() {self.db.count()}")
+            log.debug(f"db.count() {self.db.count()}")
 
             self.__initialized = True
 
     def query_db(self, query: str) -> str or None:
-        print(query)
+        log.debug(f"query: {query}")
         if query == "" or query is None:
             return None
 
@@ -65,19 +69,19 @@ class RagSingleton:
         [all_passages] = result["documents"]
         [distances] = result["distances"]
 
-        similarity_threshold = 0.8  # Adjust this threshold as needed.
+        similarity_threshold = 0.85  # Adjust this threshold as needed.
 
         distance = distances[0]
-        print(f"distance: {distance}")
+        log.debug(f"distance: {distance}")
         passages = None
         if distance < similarity_threshold:  # Lower distance means more relevant.
-            print("Relevant results found.")
+            log.debug("Relevant results found.")
             passages = ""
             for passage in all_passages:
                 passages += f"REFERENCE: {passage.replace("\n", " ")}\n"
-            print(passages)
+            log.debug(f"passages: {passages}")
         else:
-            print("No relevant results found.")
+            log.debug("No relevant results found.")
 
         return passages
 

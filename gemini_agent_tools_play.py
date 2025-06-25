@@ -26,7 +26,7 @@ Use RagSingleton.instance.query_db to retrieve useful references information abo
 
 # Start a chat with automatic function calling enabled.
 chat = genai_client.chats.create(
-    model="gemini-2.0-flash",
+    model="gemini-2.5-flash",
     config=types.GenerateContentConfig(
         system_instruction=instruction,
         tools=tools,
