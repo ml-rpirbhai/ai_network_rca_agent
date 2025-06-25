@@ -50,7 +50,7 @@ if __name__ == '__main__':
 
     nsp_kafka_client_process.join()
     ai_agent_process.join()
-    subscr_monitor.join()
+    #subscr_monitor.join()
 
     print("Main exited")
     log.info("Main exited")

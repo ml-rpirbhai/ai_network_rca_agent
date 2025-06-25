@@ -4,6 +4,9 @@ import yaml
 
 from typing import Annotated, Literal, Any
 from typing import Dict
+
+from google import genai
+from langchain_core.messages import HumanMessage
 from typing_extensions import TypedDict
 
 from google.genai import types
@@ -18,6 +21,7 @@ from multiprocessing import Queue
 import time
 
 from anonymizer import AnonymizerSingleton
+import netconf_client
 from nsp_client import NspClientSingleton
 from rag import RagSingleton
 
@@ -28,18 +32,24 @@ with open('config/logger.yaml', 'r') as stream:
     logging.config.dictConfig(logger_config)
     log = logging.getLogger(__name__)
 
+"""
+LangGraph LLM instructions
+"""
 SYSINT = ("system", # 'system' indicates the message is a system instruction.
           "You are the alarms details retrieval agent. Your task is to retrieve details and documentation "
           "for the alarms that have been sent to you. "
           "For each ne-id in the alarms feed: "
-          "1) Call lg_get_ne_details to get NE details (vendor, chassis-type, and OS version). Then: "
-          "2) Call lg_query_db with the vendor, chassis-type, and OS version to retrieve the reference documentation for that NE; "
+          "1) Call lg_get_ne_details to get NE details (vendor, chassis-type, OS-version). Then: "
+          "2) Call lg_query_db with the vendor, chassis-type and OS-version to retrieve the reference documentation for that NE; "
           "lg_query_db may return None if there is no documentation for that particular NE vendor/chassis/OS. "
+          "3) For interface alarms on Cisco IOS-XR: Call lg_get_cisco_ios_xr_interface_name to get the Cisco object associated with the SNMP ifIndex. "
           "Description of alarms (by column): time-detected | ne-name | ne-id | object-fdn | object-name | additional-info "
           )
 
-
-PROMPT = ("""You are the network alarms RCA agent. Your task is to identify the root-cause FDN
+"""
+RCA LLM instructions and prompt
+"""
+INSTRUCTIONS = ("""You are the network alarms RCA agent. Your task is to identify the root-cause FDN
              (or FDNs if there are multiple root-cause failures) from the list of alarms that have been sent to you.
              Respond with either the root-cause object-fdns or 'indeterminate'.
              The root-cause is 'indeterminate' if none of the alarms in the feed is a equipment failure or configuration error.
@@ -52,7 +62,7 @@ PROMPT = ("""You are the network alarms RCA agent. Your task is to identify the 
                        "root_cause_fdns": ["fdn:..."]
              }       
              
-             Description of alarms (by column): time-detected | ne-name | ne-id | object-fdn | additional-text                 
+             Description of alarms (by column): time-detected | ne-name | ne-id | object-fdn | object-name | additional-info                 
 
              EXAMPLE:
              2025-05-12T18:32:01.672731026Z | sim234_236 | 2001::236 | fdn:app:mdm-ami-cmodel:2001::236:/openconfig-network-instance:network-instances/network-instance/protocols/protocol/bgp/neighbors/neighbor/state:/router[router-name='Base']/bgp/neighbor[ip-address='10.1.1.1'] | | (ASN 200) VR 1: Group iBGP: Peer 10.1.1.1: received notification: code CEASE subcode CONN_REJECT
@@ -73,11 +83,13 @@ PROMPT = ("""You are the network alarms RCA agent. Your task is to identify the 
              {
                         "reasoning": "<your reasoning here>",
                         "root_cause_fdns": [fdn:app:mdm-ami-cmodel:m07rjwbp:equipment:Equipment:/port[port-id='1/1/2/1']]
-             }    
-             
-             Which of the following alarms is the root-cause failure?                
+             }                 
              """
           )
+
+PROMPT = ("""Read the 'NE_DETAILS + DOCS:' for instructions on how to interpret some alarms. 
+             Which of the following alarms is the root-cause failure?
+             Description of alarms (by column): time-detected | ne-name | ne-id | object-fdn | object-name | additional-info""")
 
 
 class OrderState(TypedDict):
@@ -116,6 +128,10 @@ class GenAISingleton:
     def lg_query_db(query: str) -> str | None:
         """Retrieves relevant reference documentation for an NE instance vendor/chassis/OS"""
 
+    @tool
+    def lg_get_cisco_ios_xr_interface_name(ne_id: str, snmp_index: int) -> str:
+        """For Cisco IOS-XR routers only. Given an interface SNMP ifindex, retrieves the interface name"""
+
     def __new__(cls, nsp_client: NspClientSingleton):
         if cls.__instance is None:
             cls.__instance = super(GenAISingleton, cls).__new__(cls)
@@ -126,15 +142,21 @@ class GenAISingleton:
             with open('config/conf.yaml', 'r') as stream:
                 conf = yaml.load(stream, Loader=yaml.FullLoader)
             GOOGLE_API_KEY = conf['google_gemini_api_key']
-            self.__llm = ChatGoogleGenerativeAI(model="gemini-2.0-flash",
-                                                api_key=GOOGLE_API_KEY)
+
+            """
+            We will use 2 LLM clients: One for LangGraph, and another for the final prompt -> RCA
+            """
+            self.__langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
+                                                          api_key=GOOGLE_API_KEY)
             # Attach the tools to the model so that it knows what it can call
-            self.tools = [self.lg_get_ne_details, self.lg_query_db]
-            self.__llm_with_tools = self.__llm.bind_tools(self.tools)
+            self.langgraph_tools = [self.lg_get_ne_details, self.lg_query_db, self.lg_get_cisco_ios_xr_interface_name]
+            self.__langgraph_llm_with_tools = self.__langgraph_llm.bind_tools(self.langgraph_tools)
             self.__build_graph()
             self.__nsp_client = nsp_client
             self.anonymizer = AnonymizerSingleton()
             self.__rag_client = RagSingleton(self)
+
+            self.__llm = genai.Client(api_key=GOOGLE_API_KEY)
 
             self.__initialized = True
 
@@ -143,7 +165,7 @@ class GenAISingleton:
         # Initialize the order
         defaults = {"order": {"ne_details": {}, "references": {}}, "finished": False}
 
-        new_output = self.__llm_with_tools.invoke([SYSINT] + state["messages"])
+        new_output = self.__langgraph_llm_with_tools.invoke([SYSINT] + state["messages"])
 
         # Set up some defaults if not already set, then pass through the provided state,
         # overriding only the "messages" field.
@@ -157,21 +179,40 @@ class GenAISingleton:
         flow_completed = False
 
         for tool_call in tool_msg.tool_calls:
+            #Sleep for 1 sec to avoid hitting rate-limits on Gemini free-tier
+            time.sleep(1)
+            log.debug(tool_call)
 
             if tool_call["name"] == "lg_get_ne_details":
-
-                print(tool_call)
                 ne_id = tool_call["args"]["ne_id"]
                 response = self.__nsp_client.get_ne_details(ne_id)
                 # Update the order record ne_details
-                order["ne_details"][ne_id] = response
+                ne_details_map = {}
+                ne_details_map['ne'] = response
+                order["ne_details"][ne_id] = ne_details_map
 
             elif tool_call["name"] == "lg_query_db":
-
-                print(tool_call)
                 query = tool_call["args"]["query"]
                 response = self.__rag_client.query_db(query)
                 order["references"][query] = response
+
+                if response is None:
+                    flow_completed = True
+                #else:
+                    # Inject the RAG as a message Gemini can see in the next turn
+                #    outbound_msgs.append(
+                #        HumanMessage(content=f"NE documentation for {query}:\n{response}")
+                #    )
+
+            elif tool_call["name"] == "lg_get_cisco_ios_xr_interface_name":
+                ne_id = tool_call["args"]["ne_id"]
+                snmp_index = int(tool_call["args"]["snmp_index"])  # Need to cast to int, because Gemini sends float
+                response = netconf_client.get_cisco_ios_xr_interface_name_fn(ne_id, snmp_index)
+
+                ifIndex_to_interface_name_map = {}
+                ifIndex_to_interface_name_map[snmp_index] = response
+                order["ne_details"][ne_id]['ifIndex_to_interface_name'] = ifIndex_to_interface_name_map
+
                 flow_completed = True
 
             else:
@@ -186,6 +227,7 @@ class GenAISingleton:
                 )
             )
 
+        log.debug(f"messages: {outbound_msgs}, order: {order}, finished: {flow_completed}")
         return {"messages": outbound_msgs, "order": order, "finished": flow_completed}
 
     def __maybe_route_to_tools(self, state: OrderState) -> Literal["tools", "__end__"]:
@@ -219,10 +261,20 @@ class GenAISingleton:
     def prompt_from_feed(self, alarms_feed) -> json:
         # Start a chat
         state = self.__rca_langgraph.invoke({"messages": ["alarms", alarms_feed]})
-        final_prompt = f"{PROMPT}\n\n{alarms_feed}\n\nNE DETAILS + DOCS:\n{pprint(state['order'])}"
+
+        config = types.GenerateContentConfig(temperature=1.0,
+                                             system_instruction=INSTRUCTIONS)
+
+        # Start a chat with automatic function calling enabled.
+        chat = self.__llm.chats.create(model="gemini-2.5-flash",
+                                          config=config)
+
+        final_prompt = f"{PROMPT}\n\n{alarms_feed}\n\nNE DETAILS + DOCS:\n{state['order']}"
+        log.info(f"final_prompt: {final_prompt}")
 
         # Invoke. Clean up the text string so that we return proper-JSON-format
-        return self.__llm.invoke([final_prompt]).content.strip('`').replace('json', '', 1)
+        return chat.send_message(final_prompt + alarms_feed).text.strip('`').replace('json', '', 1)
+
 
     def drain_queue(self, q: Queue):
         messages = []
@@ -299,7 +351,38 @@ if __name__ == '__main__':
 2025-05-29T16:37:34.747380091Z | sim234_225 | 2001::225 | fdn:app:mdm-ami-cmodel:2001::225:/openconfig-network-instance:network-instances/network-instance/protocols/protocol/bgp/neighbors/neighbor/state:/service[service-id='411']/bgp/neighbor[ip-address='10.41.1.2'] | | (ASN 200) VR 7: Group toCE: Peer 10.41.1.2: being disabled because the interface is operationally disabled
 
 """
+    alarms_feed_2 = \
+"""
+2025-06-23T18:43:04.870104158Z | xrv24.labs.ca.alcatel-lucent.com | 38.120.234.239 | fdn:app:mdm-ami-cmodel:38.120.234.239:equipment:NetworkElement:38.120.234.239 | | Alarm Details 
+trapName : IsisAdjacencyChange
+isisNotificationSysLevelIndex : 1
+isisNotificationCircIfIndex : 12
+isisPduLspId : 03 81 20 23 42 36 00 00 
+isisAdjState : 4
+2025-06-23T18:43:05.123821669Z | xrv24.labs.ca.alcatel-lucent.com | 38.120.234.239 | fdn:app:mdm-ami-cmodel:38.120.234.239:equipment:NetworkElement:38.120.234.239 | | Alarm Details 
+trapName : IsisAdjacencyChange
+isisNotificationSysLevelIndex : 2
+isisNotificationCircIfIndex : 12
+isisPduLspId : 03 81 20 23 42 36 00 00 
+isisAdjState : 4
+2025-06-23T18:43:14.461006551Z | xrv24.labs.ca.alcatel-lucent.com | 38.120.234.239 | fdn:app:mdm-ami-cmodel:38.120.234.239:equipment:NetworkElement:38.120.234.239 | | Alarm Details 
+trapName : OspfNeighborDown
+ospfRouterId : 38.120.234.239
+ospfNbrIpAddr : 10.236.239.1
+ospfNbrAddressLessIndex : 0
+ospfNbrRtrId : 38.120.234.236
+ospfNbrState : 1
+2025-06-23T18:43:17.474872323Z | xrv24.labs.ca.alcatel-lucent.com | 38.120.234.239 | fdn:app:mdm-ami-cmodel:38.120.234.239:equipment:NetworkElement:38.120.234.239 | | Alarm Details 
+trapName : LspDown
+mplsTunnelAdminStatus : 1
+mplsTunnelOperStatus : 1
+2025-06-23T18:43:17.831869840Z | xrv24.labs.ca.alcatel-lucent.com | 38.120.234.239 | fdn:app:mdm-ami-cmodel:38.120.234.239:equipment:NetworkElement:38.120.234.239 | | Alarm Details:
+trapName : PortDown 
+ifIndex : 16 
+ifAdminStatus : 2
+ifOperStatus : 2
+"""
 
-    alarms_feed = alarms_feed_1
+    alarms_feed = alarms_feed_2
     rca = gen_ai.prompt_from_feed(alarms_feed)
     print(rca)
