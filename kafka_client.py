@@ -56,22 +56,26 @@ class Client:
         finally:
             self.consumer.close()
 
+    """
+    Return: |time|ne-name|ne-id|object-fdn|object-name|additional-info|
+    """
+    def build_gen_ai_alarm_feed(self, event_time: str, message_body: dict) -> str:
+        return ' | '.join((event_time,
+                           message_body.get('ne-name', 'null') or 'null',
+                           message_body.get('ne-id', 'null') or 'null',
+                           message_body['resource'],
+                           message_body['affected-object-name'],
+                           ' , '.join((message_body['additional-text'], message_body['alt-resource']))))
 
     """
     Extract only the messages and fields that we care about
-    format:
-    |time|object|additional-text|
     """
     def __post_filter_and_data_extractor(self, message: dict):
         if message is not None:
             if 'nsp-model-notification:object-creation' in message:
                 event_time = message['nsp-model-notification:object-creation']['event-time']
                 message_body = message['nsp-model-notification:object-creation']['tree']['/nsp-fault:alarms/alarm-list/alarm']
-                return ' | '.join((event_time,
-                                   message_body.get('ne-name'),
-                                   message_body.get('ne-id'),
-                                   message_body['resource'],
-                                   message_body['additional-text']))
+                return self.build_gen_ai_alarm_feed(event_time, message_body)
             elif 'nsp-model-notification:object-modification' in message:
                 if 'tree' in message['nsp-model-notification:object-modification']:
                     event_time = message['nsp-model-notification:object-modification']['event-time']
@@ -79,11 +83,9 @@ class Client:
                     RESOURCE_BGP_NEIGHBOR_REGEXP = '.+bgp/neighbor.+'
                     bgp_neighbor_match = re.search(RESOURCE_BGP_NEIGHBOR_REGEXP, message_body['resource'])
                     if bgp_neighbor_match:
-                        return ' | '.join((event_time,
-                                           message_body.get('ne-name'),
-                                           message_body.get('ne-id'),
-                                           message_body['resource'],
-                                           message_body['additional-text']))
+                        return self.build_gen_ai_alarm_feed(event_time, message_body)
+
+            log.debug("Message did not meet filter criteria. Will not extract")
 
 """
 External method to initialize Kafka client to work around Pickling error with multiprocessing.Process(target=kafka_client.connect(), ...).
@@ -155,7 +157,4 @@ if __name__ == '__main__':
 }"""
 
     client = Client(server='135.121.156.104', topic_id='ns-eg-787391e9-d9c0-47dc-99bc-d87e3bbcc5d7')
-    #print(client.post_filter_and_data_extractor(message=json.loads(json_msg)))
     client.connect()
-
-    #run_client(server='135.121.156.104', topic_id='ns-eg-ea01c78a-4f66-473d-bd3c-8862278cf92a')

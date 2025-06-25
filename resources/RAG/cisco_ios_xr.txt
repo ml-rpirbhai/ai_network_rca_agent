@@ -1,3 +1,9 @@
-For alarms raised on Cisco IOS-XR NEs:
-Alarms tagged with 'equipment:NetworkElement' FDNs actually may not be network-element-level alarms: These are
-alarms raised on more granular objects on the NE. The additional-text field will provide details on the object specifics.
+For alarms raised on Cisco CiscoR-IOSXRV9000-CC IOS-XR 24.2.1:
+These alarms are typically triggered from SNMP traps, and some of the alarms' contents may be incorrect:
+Alarms with 'equipment:NetworkElement' FDNs may not be network-element-level alarms: These alarms may actually be
+on more granular objects on the NE. Additionally, for traps generated on interface objects, the 'additional-info' 'trapName: PortDown'
+may be incorrect. In these cases, the alarms' 'object-name' and other 'additional-info' will provide useful details on the actual affected-object.
+If you determine that the interface is not actually a physical port, then the root-cause is likely another alarm or 'inderminate'.
+Call lg_get_cisco_ios_xr_interface_name to get the Cisco object associated with the SNMP ifIndex;
+Use your Cisco knowledge to infer the interface's object-type from the object-name. Remember, it is not typical for
+a transport-tunnel cause an IGP peering or an LSP to fail!

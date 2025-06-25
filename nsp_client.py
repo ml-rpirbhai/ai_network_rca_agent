@@ -211,6 +211,7 @@ class NspClientSingleton:
             ne_details['version'] = ne_data['version']
             ne_details['product'] = ne_data['product']
             ne_details['type'] = ne_data['type']
+            ne_details['mgmt_ip_addr'] = ne_data['ip-address']
         else:
             log.error(f"Failed:{response.status_code}, {response.text}")
 
@@ -246,6 +247,6 @@ if __name__ == '__main__':
     #kafka_client.connect()
     #print(nsp_client.get_l3vpn_interface_details('2001::225', '411', 'toCE'))
     print(nsp_client.get_ne_details('38.120.234.239'))
-    print(nsp_client.get_ne_details('2001::225'))
+    #print(nsp_client.get_ne_details('2001::225'))
 
 
