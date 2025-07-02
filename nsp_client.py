@@ -169,7 +169,10 @@ class NspClientSingleton:
     def get_l3vpn_interface_details(self, ne_id: str, svc_name: str, if_name: str) -> dict:
         args = [ne_id, svc_name, if_name]
         # Check redis
-        if_details = json.loads(self.redis_client.get_return_value('get_l3vpn_interface_details', args))
+        if_details = self.redis_client.get_return_value('get_l3vpn_interface_details', args)
+        if if_details is not None:
+            # Convert to dict to end applications
+            if_details = json.loads(if_details)
 
         if if_details is None:
             url = f"{self.server_url}/restconf/data/nsp-service-intent:intent-base/intent={svc_name},vprn/intent-specific-data/vprn:vprn/site-details/site={ne_id},{svc_name}/interface-details/interface={if_name}"
@@ -206,7 +209,10 @@ class NspClientSingleton:
     def get_ne_details(self, ne_id: str) -> dict:
         args = [ne_id]
         # Check redis
-        ne_details = json.loads(self.redis_client.get_return_value('get_ne_details', args))
+        ne_details = self.redis_client.get_return_value('get_ne_details', args)
+        if ne_details is not None:
+            # Convert to dict to end applications
+            ne_details = json.loads(ne_details)
 
         if ne_details is None:
             url = f"{self.server_url}/restconf/operations/nsp-inventory:find"
