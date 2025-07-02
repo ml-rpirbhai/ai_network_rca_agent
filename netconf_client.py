@@ -4,14 +4,27 @@ import xmltodict
 from ncclient import manager
 from nsp_client import NspClientSingleton
 
+from redis_client import RedisClient
+
 log = logging.getLogger(__name__)
 
 """
 * Called by Gemini Agent *
 """
 def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
-    nc_client = Client(ne_id, username='admin', password='Mainstreet5')
-    return nc_client.get_cisco_ios_xr_interface_name(snmp_index)
+    args = [ne_id, snmp_index]
+    # Check redis
+    redis_client = RedisClient()
+    interface_name = redis_client.get_return_value('get_cisco_ios_xr_interface_name_fn', args)
+
+    if interface_name is None:
+        nc_client = Client(ne_id, username='admin', password='Mainstreet5')
+        interface_name = nc_client.get_cisco_ios_xr_interface_name(snmp_index)
+
+        # Store in redis
+        redis_client.store_call('get_cisco_ios_xr_interface_name_fn', args, interface_name)
+
+    return interface_name
 
 
 class Client:
@@ -20,6 +33,7 @@ class Client:
 
         self.ncClientManager = manager.connect(host=mgmt_ip_addr, port='830', username=username,
                                                password=password, hostkey_verify=False)
+        self.redis_client = RedisClient()
 
     def _get(self, filter):
         netconf_response = self.ncClientManager.get(filter)
