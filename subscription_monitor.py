@@ -20,16 +20,19 @@ class SubscriptionMonitorSingleton(Thread):
 
     check_subscription_interval = 300  # Every 5 minutes
 
-    def __new__(cls, nsp_client: NspClientSingleton):
+    def __new__(cls):
         if cls.__instance is None:
             cls.__instance = super(SubscriptionMonitorSingleton, cls).__new__(cls)
         return cls.__instance
 
-    def __init__(self, nsp_client: NspClientSingleton):
+    def __init__(self):
         if not self.__initialized:
             super().__init__()
             self.daemon = True
-            self.nsp_client = nsp_client
+            self.nsp_client = NspClientSingleton.instance
+            if self.nsp_client is None:
+                log.critical("NSP client has not been initialized")
+                return
             self.__initialized = True
 
     """
@@ -58,6 +61,8 @@ class SubscriptionMonitorSingleton(Thread):
 Test
 """
 if __name__ == '__main__':
-    nsp_client = NspClientSingleton(server='135.121.156.104')
-    subscription_monitor = SubscriptionMonitorSingleton(nsp_client)
+    nsp_c = NspClientSingleton(server='135.121.156.104')
+    nsp_c.authenticate()
+    nsp_c.create_subscription()
+    subscription_monitor = SubscriptionMonitorSingleton()
     subscription_monitor.run()
