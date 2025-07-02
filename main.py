@@ -26,22 +26,22 @@ def run_genai_agent(nsp_client: NspClientSingleton, queue: Queue):
 if __name__ == '__main__':
     print("Initializing main ...")
     log.info("Initializing main ...")
-    nsp_server_ip = '135.121.156.104'
-
-    nsp_kafka_to_ai = Queue()
 
     # Initialize NSP Client
+    nsp_server_ip = '135.121.156.104'
     nsp_client = NspClientSingleton(server=nsp_server_ip)
     nsp_client.authenticate()  # Get Token
     nsp_client.create_subscription()  # Subscribe to NSP-FAULT-YANG
     subscription_details_dict = nsp_client.get_subscription_details()  # Get Subscription details
 
+    # Kafka -> GenAI Queue
+    nsp_kafka_to_ai = Queue()
     nsp_kafka_client_process = Process(target=kafka_client.run_client, args=(nsp_server_ip, subscription_details_dict['topic_id'], nsp_kafka_to_ai))
-
-    # Initialize GenAI
     ai_agent_process = Process(target=run_genai_agent, args=(nsp_client, nsp_kafka_to_ai,))
 
+    # Initialize Kafka Client
     nsp_kafka_client_process.start()
+    # Initialize GenAI
     ai_agent_process.start()
 
     # Initialize the Monitor Thread

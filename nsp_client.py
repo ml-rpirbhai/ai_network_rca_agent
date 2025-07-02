@@ -2,12 +2,14 @@ import requests
 from requests.auth import HTTPBasicAuth
 
 from datetime import datetime, timezone
+import inspect
 import json
 import logging
 import pytz
 import time
 
 from kafka_client import Client as KafkaClient
+from redis_client import RedisClient
 
 log = logging.getLogger(__name__)
 
@@ -38,6 +40,7 @@ class NspClientSingleton:
                 "Content-Type": "application/json"
             }
             self.subscription_id = None
+            self.redis_client = RedisClient()
             self.initialized = True
 
     """
@@ -169,51 +172,68 @@ class NspClientSingleton:
                        2. 'ip_addr': str[] e.g. ['10.41.1.1/30', 'FC10:41:1::1/126']
     """
     def get_l3vpn_interface_details(self, ne_id: str, svc_name: str, if_name: str) -> {}:
-        url = f"{self.server_url}/restconf/data/nsp-service-intent:intent-base/intent={svc_name},vprn/intent-specific-data/vprn:vprn/site-details/site={ne_id},{svc_name}/interface-details/interface={if_name}"
+        args = [ne_id, svc_name, if_name]
+        # Check redis
+        if_details = self.redis_client.get_return_value('get_l3vpn_interface_details', args)
 
-        log.debug(f"Request: {url}")
-        response = requests.get(
-            url,
-            verify=False,  # Skip certificate verification
-            headers=self.headers_dict)
+        if if_details is None:
+            url = f"{self.server_url}/restconf/data/nsp-service-intent:intent-base/intent={svc_name},vprn/intent-specific-data/vprn:vprn/site-details/site={ne_id},{svc_name}/interface-details/interface={if_name}"
 
-        if_details = {}
-        if response.status_code == 200:
-            log.debug(f"Response: {response.text}")
-            response_dict = json.loads(response.text)
-            if_details['port_id'] = response_dict['vprn:interface']['sap']['port-id']
-            ipv4_and_ipv6_addr = []
-            if_primary_ipv4_address_ctx = response_dict['vprn:interface']['ipv4']['primary']
-            ipv4_and_ipv6_addr.append(if_primary_ipv4_address_ctx['address'] + '/' + str(if_primary_ipv4_address_ctx['prefix-length']))
-            #TODO: IPv6
-            if_details['ip_addr'] = ipv4_and_ipv6_addr
-        else:
-            log.error(f"Failed:{response.status_code}, {response.text}")
+            log.debug(f"Request: {url}")
+            response = requests.get(
+                url,
+                verify=False,  # Skip certificate verification
+                headers=self.headers_dict)
+
+            if_details = {}
+            if response.status_code == 200:
+                log.debug(f"Response: {response.text}")
+                response_dict = json.loads(response.text)
+                if_details['port_id'] = response_dict['vprn:interface']['sap']['port-id']
+                ipv4_and_ipv6_addr = []
+                if_primary_ipv4_address_ctx = response_dict['vprn:interface']['ipv4']['primary']
+                ipv4_and_ipv6_addr.append(if_primary_ipv4_address_ctx['address'] + '/' + str(if_primary_ipv4_address_ctx['prefix-length']))
+                #TODO: IPv6
+                if_details['ip_addr'] = ipv4_and_ipv6_addr
+
+                # Store in redis
+                self.redis_client.store_call('get_l3vpn_interface_details', args, if_details)
+
+            else:
+                log.error(f"Failed:{response.status_code}, {response.text}")
 
         return if_details
 
+    """
+    * Called by Gemini Agent *
+    """
     def get_ne_details(self, ne_id: str) -> {}:
-        url = f"{self.server_url}/restconf/operations/nsp-inventory:find"
-        data = f'{{"nsp-inventory:input": {{"xpath-filter": "/nsp-equipment:network/network-element[ne-id=\'{ne_id}\']", "depth": "2"}}}}'
+        args = [ne_id]
+        # Check redis
+        ne_details = self.redis_client.get_return_value('get_ne_details', args)
 
-        log.debug(f"Request: {url}, Data: {data}")
-        response = requests.post(
-            url,
-            data=data,
-            verify=False,  # Skip certificate verification
-            headers=self.headers_dict)
+        if ne_details is None:
+            url = f"{self.server_url}/restconf/operations/nsp-inventory:find"
+            data = f'{{"nsp-inventory:input": {{"xpath-filter": "/nsp-equipment:network/network-element[ne-id=\'{ne_id}\']", "depth": "2"}}}}'
 
-        ne_details = {}
-        if response.status_code == 200:
-            log.debug(f"Response: {response.text}")
-            response_dict = json.loads(response.text)
-            ne_data = response_dict['nsp-inventory:output']['data'][0]
-            ne_details['version'] = ne_data['version']
-            ne_details['product'] = ne_data['product']
-            ne_details['type'] = ne_data['type']
-            ne_details['mgmt_ip_addr'] = ne_data['ip-address']
-        else:
-            log.error(f"Failed:{response.status_code}, {response.text}")
+            log.debug(f"Request: {url}, Data: {data}")
+            response = requests.post(
+                url,
+                data=data,
+                verify=False,  # Skip certificate verification
+                headers=self.headers_dict)
+
+            ne_details = {}
+            if response.status_code == 200:
+                log.debug(f"Response: {response.text}")
+                response_dict = json.loads(response.text)
+                ne_data = response_dict['nsp-inventory:output']['data'][0]
+                ne_details['version'] = ne_data['version']
+                ne_details['product'] = ne_data['product']
+                ne_details['type'] = ne_data['type']
+                ne_details['mgmt_ip_addr'] = ne_data['ip-address']
+            else:
+                log.error(f"Failed:{response.status_code}, {response.text}")
 
         return ne_details
 
@@ -245,8 +265,7 @@ if __name__ == '__main__':
     #nsp_client.renew_subscription()
     #kafka_client = KafkaClient(server='135.121.156.104', topic_id=subscription_details_dict['topic_id'])
     #kafka_client.connect()
-    #print(nsp_client.get_l3vpn_interface_details('2001::225', '411', 'toCE'))
-    print(nsp_client.get_ne_details('38.120.234.239'))
+    print(nsp_client.get_l3vpn_interface_details('2001::225', '411', 'toCE'))
+    #print(nsp_client.get_ne_details('38.120.234.239'))
     #print(nsp_client.get_ne_details('2001::225'))
-
 
