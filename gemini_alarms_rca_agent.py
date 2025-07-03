@@ -6,7 +6,6 @@ from typing import Annotated, Literal, Any
 from typing import Dict
 
 from google import genai
-from langchain_core.messages import HumanMessage
 from typing_extensions import TypedDict
 
 from google.genai import types
@@ -17,11 +16,11 @@ from langchain_google_genai import ChatGoogleGenerativeAI
 from langgraph.graph import StateGraph, START, END
 from langgraph.graph.message import add_messages
 
-from multiprocessing import Queue
 import time
 
 from anonymizer import AnonymizerSingleton
 import netconf_client
+from message_bus import MessageBus
 from nsp_client import NspClientSingleton
 from rag import RagSingleton
 
@@ -140,8 +139,14 @@ class GenAISingleton:
     def __init__(self, nsp_client: NspClientSingleton):
         if not self.__initialized:
             with open('config/conf.yaml', 'r') as stream:
-                conf = yaml.load(stream, Loader=yaml.FullLoader)
-            GOOGLE_API_KEY = conf['google_gemini_api_key']
+                config = yaml.load(stream, Loader=yaml.FullLoader)
+
+            # Initialize message-bus consumer
+            bus = MessageBus(config['message_bus_name'])
+            self.consumer = bus.instantiate_consumer('alarms_group', 'genai_alarms_consumer')
+
+
+            GOOGLE_API_KEY = config['google_gemini_api_key']
 
             """
             We will use 2 LLM clients: One for LangGraph, and another for the final prompt -> RCA
@@ -276,21 +281,20 @@ class GenAISingleton:
         return chat.send_message(final_prompt + alarms_feed).text.strip('`').replace('json', '', 1)
 
 
-    def drain_queue(self, q: Queue):
+    def drain_queue(self):
         messages = []
-        while not q.empty():
-            log.info("Receiving messages ...")
-            try:
-                messages.append(q.get_nowait())
-            except:
-                log.error("Unable to retrieve messages from q")
+        log.info("Receiving messages ...")
+        try:
+            messages.append(self.consumer.consume())
+        except:
+            log.error("Unable to retrieve messages from q")
         return messages
 
-    def prompt_bulk_from_queue(self, queue: Queue):
+    def prompt_bulk_from_queue(self):
         while True:
             log.info("Waiting ...")
             time.sleep(5)
-            alarms_list = self.drain_queue(queue)
+            alarms_list = self.drain_queue()
             if len(alarms_list) > 0:
                 alarms_feed = '\n'.join(alarms_list)
                 print(alarms_feed)

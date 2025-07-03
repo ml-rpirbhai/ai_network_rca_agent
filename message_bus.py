@@ -38,20 +38,19 @@ class MessageBus:
             self.redis_client = redis.Redis(decode_responses=True)
 
         def consume(self):
-            consumer_group = self.c_group
             stream = self.bus.name
 
             # Create the consumer group if it doesn't exist
             try:
-                self.redis_client.xgroup_create(stream, consumer_group, id='0', mkstream=True)
+                self.redis_client.xgroup_create(stream, self.c_group, id='0', mkstream=True)
             except redis.exceptions.ResponseError as e:
                 if "BUSYGROUP" in str(e):
-                    print("[Consumer] Group already exists, continuing...")
+                    log.debug(f"Group {self.c_group} already exists. Continuing ...")
                 else:
                     raise
 
             while True:
-                resp = self.redis_client.xreadgroup(groupname=consumer_group,
+                resp = self.redis_client.xreadgroup(groupname=self.c_group,
                                                     consumername=self.c_name,
                                                     streams={stream: '>'},
                                                     block=5000)  # block for 5 seconds
@@ -59,9 +58,9 @@ class MessageBus:
                 if resp:
                     for stream_name, messages in resp:
                         for msg_id, msg in messages:
-                            print(f"[Consumer] Received alarm ID {msg_id}: {msg}")
+                            log.debug(f"[Consumer] Received msg ID {msg_id}: {msg}")
                             # Acknowledge message
-                            self.redis_client.xack(stream, consumer_group, msg_id)
+                            self.redis_client.xack(stream, self.c_group, msg_id)
 
 if __name__ == "__main__":
     b = MessageBus("my_bus")

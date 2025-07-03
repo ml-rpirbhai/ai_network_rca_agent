@@ -13,12 +13,12 @@ class NspClientSingleton:
     instance = None
     initialized = False
 
-    def __new__(cls, username='admin', password='NokiaNsp1!'):
+    def __new__(cls, server, username='admin', password='NokiaNsp1!'):
         if cls.instance is None:
             cls.instance = super(NspClientSingleton, cls).__new__(cls)
         return cls.instance
 
-    def __init__(self, server=None, username='admin', password='NokiaNsp1!'):
+    def __init__(self, server, username='admin', password='NokiaNsp1!'):
         if not self.initialized:
             self.server_url = f"https://{server}"
             self.username = username
@@ -115,7 +115,7 @@ class NspClientSingleton:
             token:           If left as None, use self.token. Is not None only when testing.
     Returns: subscription_details_dict
     """
-    def get_subscription_details(self, subscription_id=None, token=None) -> {}:
+    def get_subscription_details(self, subscription_id=None, token=None) -> dict:
         subscription_details_dict = {}  # Keys: 'topic_id', 'subscription_id', 'expires_at_unix_time'
 
         if subscription_id != None: # For testing purpose only
