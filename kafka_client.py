@@ -14,9 +14,15 @@ with open('config/kafka_client_logger.yaml', 'r') as stream:
     log = logging.getLogger(__name__)
 
 class Client:
-    def __init__(self, server, topic_id):
+    def __init__(self, server, topic_id=None):
+        print("Initializing kafka_client ...")
+        log.info("Initializing ...")
         with open('config/conf.yaml', 'r') as stream:
             config = yaml.load(stream, Loader=yaml.FullLoader)
+
+        if topic_id is None:
+            with open('config/topic_id.txt', 'r') as stream:
+                topic_id = stream.readline()
 
         # Initialize message-bus producer
         bus = MessageBus(config['message_bus_name'])
@@ -55,8 +61,13 @@ class Client:
                 if msg_feed is not None:
                     log.debug(msg_feed)
                     # Put the message on the queue
-                    log.info("Putting message on bus")
-                    self.message_bus_producer.publish(msg_feed)
+                    published_message = {}
+                    published_message['message'] = msg_feed
+                    if isinstance(published_message, dict):
+                        log.info("Putting message on bus ...")
+                        self.message_bus_producer.publish(published_message)
+                    else:
+                        log.error(f"Unable to publish message. Payload is not dict: {published_message}")
 
         except KeyboardInterrupt:
             log.critical("Consumer stopped.")
@@ -95,5 +106,5 @@ class Client:
             log.debug("Message did not meet filter criteria. Will not extract")
 
 if __name__ == '__main__':
-    client = Client(server='135.121.156.104', topic_id='ns-eg-787391e9-d9c0-47dc-99bc-d87e3bbcc5d7')
+    client = Client(server='135.121.156.104')
     client.connect()

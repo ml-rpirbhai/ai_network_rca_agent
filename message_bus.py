@@ -15,9 +15,10 @@ class MessageBus:
     def get_producer(self) -> 'MessageBus._Producer':
         return self.producer
 
-    def instantiate_consumer(self, c_group: str, c_name: str) -> 'MessageBus._Consumer':
-        consumer = MessageBus._Consumer(self, c_group, c_name)
+    def instantiate_consumer(self, c_name: str) -> 'MessageBus._Consumer':
+        consumer = MessageBus._Consumer(self, c_name)
         self.consumers[c_name] = consumer
+
         return consumer
 
     class _Producer:
@@ -31,41 +32,42 @@ class MessageBus:
 
 
     class _Consumer:
-        def __init__(self, bus: 'MessageBus', c_group: str, c_name: str):
+        def __init__(self, bus: 'MessageBus', c_name: str):
             self.bus = bus
-            self.c_group = c_group
             self.c_name = c_name
             self.redis_client = redis.Redis(decode_responses=True)
 
-        def consume(self):
-            stream = self.bus.name
-
-            # Create the consumer group if it doesn't exist
+            # Create the consumer group (it may already exist)
             try:
-                self.redis_client.xgroup_create(stream, self.c_group, id='0', mkstream=True)
+                self.redis_client.xgroup_create(self.bus.name, self.bus.name, id='0', mkstream=True)
             except redis.exceptions.ResponseError as e:
                 if "BUSYGROUP" in str(e):
-                    log.debug(f"Group {self.c_group} already exists. Continuing ...")
+                    log.debug(f"Group {self.bus.name} already exists. Continuing ...")
                 else:
                     raise
 
-            while True:
-                resp = self.redis_client.xreadgroup(groupname=self.c_group,
-                                                    consumername=self.c_name,
-                                                    streams={stream: '>'},
-                                                    block=5000)  # block for 5 seconds
+        def consume(self):
+            resp = self.redis_client.xreadgroup(groupname=self.bus.name,
+                                                consumername=self.c_name,
+                                                streams={self.bus.name: '>'},
+                                                block=5000)  # block for 5 seconds
 
-                if resp:
-                    for stream_name, messages in resp:
-                        for msg_id, msg in messages:
-                            log.debug(f"[Consumer] Received msg ID {msg_id}: {msg}")
-                            # Acknowledge message
-                            self.redis_client.xack(stream, self.c_group, msg_id)
+            msgs = []
+            if resp:
+                for _, messages in resp:
+                    for msg_id, msg in messages:
+                        log.debug(f"[Consumer] Received msg ID {msg_id}: {msg}")
+                        # Acknowledge message
+                        self.redis_client.xack(self.bus.name, self.bus.name, msg_id)
+
+                        msgs.append(msg)
+
+            return msgs
 
 if __name__ == "__main__":
     b = MessageBus("my_bus")
     p = b.get_producer()
     payload = {'message': 'Hello'}
     p.publish(payload)
-    c = b.instantiate_consumer('alarms_group', 'alarms_c_1')
+    c = b.instantiate_consumer('alarms_c_1')
     c.consume()
