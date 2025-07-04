@@ -31,8 +31,10 @@ class SubscriptionMonitorSingleton(Thread):
             self.daemon = True
             self.nsp_client = NspClientSingleton.instance
             if self.nsp_client is None:
-                log.critical("NSP client has not been initialized")
-                return
+                error_msg = "NSP client has not been initialized"
+                log.error(error_msg)
+                raise RuntimeError(error_msg)
+
             self.__initialized = True
 
     """
@@ -47,10 +49,12 @@ class SubscriptionMonitorSingleton(Thread):
             log.info("Checking subscription details ...")
             subscription_details_dict = self.nsp_client.get_subscription_details()
             if 'stage' in subscription_details_dict and subscription_details_dict['stage'] != "ACTIVE":
-                log.critical("Subscription is not ACTIVE")
-            else:
-                # Renew the subscription
-                self.nsp_client.renew_subscription()
+                error_msg = "Subscription is not ACTIVE"
+                log.critical(error_msg)
+                raise RuntimeError(error_msg)
+
+            # Renew the subscription
+            self.nsp_client.renew_subscription()
 
             time.sleep(self.check_subscription_interval)
 
