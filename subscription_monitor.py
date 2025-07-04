@@ -18,7 +18,7 @@ class SubscriptionMonitorSingleton(Thread):
     __instance = None
     __initialized = False
 
-    check_subscription_interval = 300  # Every 5 minutes
+    check_subscription_interval = 900  # Every 15 minutes
 
     def __new__(cls):
         if cls.__instance is None:
