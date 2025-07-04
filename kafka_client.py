@@ -25,11 +25,8 @@ class Client:
                 topic_id = stream.readline()
 
         # Initialize message-bus producer
-        bus = MessageBus(config['message_bus_name'])
-        self.message_bus_producer = bus.get_producer()
-
-        bus = MessageBus("alarms_bus")
-        self.message_bus_producer = bus.get_producer()
+        bus = MessageBus.get_bus(config['message_bus_name'])
+        self.message_bus_producer = bus.instantiate_producer()
 
         # Initialize Kafka
         ssl_context = ssl._create_unverified_context()

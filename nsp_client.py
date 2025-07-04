@@ -53,7 +53,9 @@ class NspClientSingleton:
             self.headers_dict["Authorization"] = f"Bearer {self.token}"
             log.debug(f"Access token: {self.token}")
         else:
-            log.critical(f"Failed to get token: {response.status_code}, {response.text}")
+            error_msg = f"Failed to get token: {response.status_code}, {response.text}"
+            log.critical(error_msg)
+            raise RuntimeError(error_msg)
 
         return self.token
 
@@ -90,7 +92,9 @@ class NspClientSingleton:
             self.subscription_id = json_response_data['subscriptionId']
             log.debug(f"subscriptionId: {self.subscription_id}, stage: {json_response_data['stage']}, expiresAt: {json_response_data['expiresAt']}")
         else:
-            log.critical(f"Failed: {response.status_code}, {response.text}")
+            error_msg = f"Failed: {response.status_code}, {response.text}"
+            log.critical(error_msg)
+            raise RuntimeError(error_msg)
 
     def renew_subscription(self):
         url = f"{self.server_url}/nbi-notification/api/v1/notifications/subscriptions/{self.subscription_id}/renewals"

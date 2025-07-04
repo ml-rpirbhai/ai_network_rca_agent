@@ -147,7 +147,7 @@ class GenAISingleton:
                 config = yaml.load(stream, Loader=yaml.FullLoader)
 
             # Initialize message-bus consumer
-            bus = MessageBus(config['message_bus_name'])
+            bus = MessageBus.get_bus(config['message_bus_name'])
             self.consumer = bus.instantiate_consumer('genai_alarms_consumer')
 
 
