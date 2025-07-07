@@ -1,0 +1,45 @@
+version: 1
+formatters:
+  simple:
+    format: '%(threadName)s %(asctime)s - %(levelname)s - %(name)s.%(funcName)s() - %(message)s'
+handlers:
+  file:
+    level: DEBUG
+    class: logging.handlers.RotatingFileHandler
+    formatter: simple
+    filename: logs/gen_ai.log
+    encoding: utf-8
+    maxBytes: 1000000000  # 1GB
+    backupCount: 1
+loggers:
+  __main__:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  anonymizer:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  gemini_alarms_rca_agent:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  message_bus:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  netconf_client:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  nsp_client:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  rag:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+root:
+  level: INFO
+  handlers: [file]
