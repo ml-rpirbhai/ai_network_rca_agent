@@ -1,3 +1,4 @@
+import json
 import logging
 import xmltodict
 
@@ -8,13 +9,14 @@ from redis_client import RedisClient
 
 log = logging.getLogger(__name__)
 
+redis_client = RedisClient()
+
 """
 * Called by Gemini Agent *
 """
 def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
     args = [ne_id, snmp_index]
     # Check redis
-    redis_client = RedisClient()
     interface_name = redis_client.get_return_value('get_cisco_ios_xr_interface_name_fn', args)
 
     if interface_name is None:
@@ -33,7 +35,6 @@ class Client:
 
         self.ncClientManager = manager.connect(host=mgmt_ip_addr, port='830', username=username,
                                                password=password, hostkey_verify=False)
-        self.redis_client = RedisClient()
 
     def _get(self, filter):
         netconf_response = self.ncClientManager.get(filter)
