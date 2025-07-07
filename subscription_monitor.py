@@ -18,18 +18,23 @@ class SubscriptionMonitorSingleton(Thread):
     __instance = None
     __initialized = False
 
-    check_subscription_interval = 300  # Every 5 minutes
+    check_subscription_interval = 900  # Every 15 minutes
 
-    def __new__(cls, nsp_client: NspClientSingleton):
+    def __new__(cls):
         if cls.__instance is None:
             cls.__instance = super(SubscriptionMonitorSingleton, cls).__new__(cls)
         return cls.__instance
 
-    def __init__(self, nsp_client: NspClientSingleton):
+    def __init__(self):
         if not self.__initialized:
             super().__init__()
             self.daemon = True
-            self.nsp_client = nsp_client
+            self.nsp_client = NspClientSingleton.instance
+            if self.nsp_client is None:
+                error_msg = "NSP client has not been initialized"
+                log.error(error_msg)
+                raise RuntimeError(error_msg)
+
             self.__initialized = True
 
     """
@@ -44,10 +49,12 @@ class SubscriptionMonitorSingleton(Thread):
             log.info("Checking subscription details ...")
             subscription_details_dict = self.nsp_client.get_subscription_details()
             if 'stage' in subscription_details_dict and subscription_details_dict['stage'] != "ACTIVE":
-                log.critical("Subscription is not ACTIVE")
-            else:
-                # Renew the subscription
-                self.nsp_client.renew_subscription()
+                error_msg = "Subscription is not ACTIVE"
+                log.critical(error_msg)
+                raise RuntimeError(error_msg)
+
+            # Renew the subscription
+            self.nsp_client.renew_subscription()
 
             time.sleep(self.check_subscription_interval)
 
@@ -58,6 +65,8 @@ class SubscriptionMonitorSingleton(Thread):
 Test
 """
 if __name__ == '__main__':
-    nsp_client = NspClientSingleton(server='135.121.156.104')
-    subscription_monitor = SubscriptionMonitorSingleton(nsp_client)
+    nsp_c = NspClientSingleton(server='135.121.156.104')
+    nsp_c.authenticate()
+    nsp_c.create_subscription()
+    subscription_monitor = SubscriptionMonitorSingleton()
     subscription_monitor.run()
