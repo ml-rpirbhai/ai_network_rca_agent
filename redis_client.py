@@ -10,14 +10,13 @@ log = logging.getLogger(__name__)
 class RedisClient:
     def __init__(self):
         self.redis_client = redis.Redis()
-        self.initialized = True
         log.debug("Initialized")
 
     def store_call(self, func_name:str, args:[], return_value):
         log.debug(f"{func_name}, {args}, {return_value}")
-        self.redis_client.set(name=f"{func_name}:{json.dumps(args)}", value=json.dumps(return_value), ex=3600)
+        self.redis_client.set(name=f"{func_name}:{json.dumps(args)}", value=json.dumps(return_value), ex=3600)  # Store for 1 hour
 
-    def get_return_value(self, func_name:str, args:[]):
+    def get_return_value(self, func_name:str, args:[]) -> str:
         log.debug(f"{func_name}, {args}")
         return self.redis_client.get(f"{func_name}:{json.dumps(args)}")
 

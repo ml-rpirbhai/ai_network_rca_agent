@@ -40,6 +40,10 @@ loggers:
     level: DEBUG
     handlers: [file]
     propagate: no
+  redis_client:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
 root:
   level: INFO
   handlers: [file]
