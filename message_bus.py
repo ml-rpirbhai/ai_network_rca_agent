@@ -32,7 +32,9 @@ class MessageBus:
         self.consumers = {}
 
     def instantiate_producer(self) -> 'MessageBus._Producer':
-        self.producer = MessageBus._Producer(self)
+        # There can be only one Producer per Bus
+        if self.producer is None:
+            self.producer = MessageBus._Producer(self)
         return self.producer
 
     def instantiate_consumer(self, c_name: str) -> 'MessageBus._Consumer':
@@ -71,8 +73,7 @@ class MessageBus:
         def consume(self):
             resp = self.redis_client.xreadgroup(groupname=self.bus.name,
                                                 consumername=self.c_name,
-                                                streams={self.bus.name: '>'},
-                                                block=5000)  # block for 5 seconds
+                                                streams={self.bus.name: '>'})
 
             msgs = []
             if resp:
