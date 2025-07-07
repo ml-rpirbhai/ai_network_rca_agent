@@ -1,9 +1,7 @@
 import logging.config
-from multiprocessing import Process, Queue
+import time
 import yaml
 
-from gemini_alarms_rca_agent import GenAISingleton
-import kafka_client
 from nsp_client import NspClientSingleton
 from subscription_monitor import SubscriptionMonitorSingleton
 
@@ -11,46 +9,39 @@ from subscription_monitor import SubscriptionMonitorSingleton
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
-with open('config/logger.yaml', 'r') as stream:
+with open('config/main_logger.yaml', 'r') as stream:
     config = yaml.load(stream, Loader=yaml.FullLoader)
 logging.config.dictConfig(config)
 log = logging.getLogger(__name__)
 
-
-def run_genai_agent(nsp_client: NspClientSingleton, queue: Queue):
-    log.info("RCA agent process starting...")
-    gen_ai = GenAISingleton(nsp_client)
-    gen_ai.prompt_bulk_from_queue(queue)
-
-
 if __name__ == '__main__':
     print("Initializing main ...")
-    log.info("Initializing main ...")
+    log.info("Initializing ...")
 
-    # Initialize NSP Client
-    nsp_server_ip = '135.121.156.104'
-    nsp_client = NspClientSingleton(server=nsp_server_ip)
-    nsp_client.authenticate()  # Get Token
-    nsp_client.create_subscription()  # Subscribe to NSP-FAULT-YANG
-    subscription_details_dict = nsp_client.get_subscription_details()  # Get Subscription details
+    # Load config file
+    with open('config/conf.yaml', 'r') as stream:
+        config = yaml.load(stream, Loader=yaml.FullLoader)
 
-    # Kafka -> GenAI Queue
-    nsp_kafka_to_ai = Queue()
-    nsp_kafka_client_process = Process(target=kafka_client.run_client, args=(nsp_server_ip, subscription_details_dict['topic_id'], nsp_kafka_to_ai))
-    ai_agent_process = Process(target=run_genai_agent, args=(nsp_client, nsp_kafka_to_ai,))
+    nsp_server_ip = config['nsp_server_ip']
 
-    # Initialize Kafka Client
-    nsp_kafka_client_process.start()
-    # Initialize GenAI
-    ai_agent_process.start()
+    # Initialize NSP client
+    nsp_c = NspClientSingleton(server=nsp_server_ip)
+    nsp_c.authenticate()  # Get Token
+    nsp_c.create_subscription()  # Subscribe to NSP-FAULT-YANG
 
-    # Initialize the Monitor Thread
-    subscr_monitor = SubscriptionMonitorSingleton(nsp_client)
+    subscr_details_dict = nsp_c.get_subscription_details()
+    # Save the topic_id to topic_id.txt for the kafka_client
+    log.info("Writing topic_id to config/topic_id.txt ...")
+    with open('config/topic_id.txt', 'w') as f:
+        f.write(subscr_details_dict['topic_id'])
+
+    # Initialize the subscription-monitor Thread
+    subscr_monitor = SubscriptionMonitorSingleton()
     subscr_monitor.start()
 
-    nsp_kafka_client_process.join()
-    ai_agent_process.join()
-    #subscr_monitor.join()
+    #Loop forever. In the future we will add health-checks here
+    while True:
+        time.sleep(5)
 
     print("Main exited")
     log.info("Main exited")
