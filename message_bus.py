@@ -45,7 +45,7 @@ class MessageBus:
 
     class _Producer:
         def __init__(self, bus: 'MessageBus'):
-            log.debug(f"Initializing {bus.name} ...")
+            log.debug(f"Initializing {bus.name} producer ...")
             self.bus = bus
             self.redis_client = redis.Redis(decode_responses=True)
 
