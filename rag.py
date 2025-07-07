@@ -10,6 +10,8 @@ import os
 from os.path import join as file_path
 import yaml
 
+from redis_client import RedisClient
+
 log = logging.getLogger(__name__)
 
 DOCS_DIR = 'resources/RAG'
@@ -52,6 +54,8 @@ class RagSingleton:
             self.db.add(documents=documents, ids=[str(i) for i in range(len(documents))])
             log.debug(f"db.count() {self.db.count()}")
 
+            self.redis_client = RedisClient()
+
             self.__initialized = True
 
     def query_db(self, query: str) -> str or None:
@@ -59,29 +63,43 @@ class RagSingleton:
         if query == "" or query is None:
             return None
 
-        # Switch to query mode when generating embeddings.
-        self.__embed_fn.document_mode = False
+        # Check redis
+        args = [query]
+        passages = self.redis_client.get_return_value('query_db', args)
 
-        # Search the Chroma DB using the specified query.
-        #query = "Cisco IOS-XR alarms"
+        if passages is None:
+            # Switch to query mode when generating embeddings.
+            self.__embed_fn.document_mode = False
 
-        result = self.db.query(query_texts=[query], n_results=1, include=["documents", "distances"])
-        [all_passages] = result["documents"]
-        [distances] = result["distances"]
+            # Search the Chroma DB using the specified query.
+            #query = "Cisco IOS-XR alarms"
 
-        similarity_threshold = 0.85  # Adjust this threshold as needed.
+            result = self.db.query(query_texts=[query], n_results=1, include=["documents", "distances"])
+            [all_passages] = result["documents"]
+            [distances] = result["distances"]
 
-        distance = distances[0]
-        log.debug(f"distance: {distance}")
-        passages = None
-        if distance < similarity_threshold:  # Lower distance means more relevant.
-            log.debug("Relevant results found.")
-            passages = ""
-            for passage in all_passages:
-                passages += f"REFERENCE: {passage.replace("\n", " ")}\n"
-            log.debug(f"passages: {passages}")
-        else:
-            log.debug("No relevant results found.")
+            similarity_threshold = 0.85  # Adjust this threshold as needed.
+
+            distance = distances[0]
+            log.debug(f"distance: {distance}")
+            passages = None
+            if distance < similarity_threshold:  # Lower distance means more relevant.
+                log.debug("Relevant results found.")
+                passages = ""
+                for passage in all_passages:
+                    passages += f"REFERENCE: {passage.replace("\n", " ")}\n"
+                log.debug(f"passages: {passages}")
+
+                self.redis_client.store_call('query_db', args, passages)
+            else:
+                log.debug("No relevant results found.")
+
+                self.redis_client.store_call('query_db', args, '')  # Can't set None, because None also means no record in redis
+
+        # If no relevant passages in redis return None.
+        # Note: Contrast '' vs None: None in redis means key does not exist
+        if passages == '':
+            passages = None
 
         return passages
 
