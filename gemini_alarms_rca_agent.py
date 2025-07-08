@@ -54,8 +54,10 @@ INSTRUCTIONS = ("""You are the network alarms RCA agent. Your task is to identif
              (or FDNs if there are multiple root-cause failures) from the list of alarms that have been sent to you.
              Respond with either the root-cause object-fdns or 'indeterminate'.
              The root-cause is 'indeterminate' if none of the alarms in the feed is a equipment failure or configuration error.
-             If there are multiple equipment failures and you cannot determine which one may be the root-cause, return multiple Object_FDNs.                         
-             Explain your reasoning. 
+             If there are multiple equipment failures and you cannot determine which one may be the root-cause, return multiple Object_FDNs. 
+             Use your memory to attribute a recent failure to an older root-cause (not more than 5 seconds prior). In other cases, 
+             the root-cause may be notified after its side-effects: This may be due to separate router processes notifying the failures.                         
+             Explain your reasoning.
              Respond **only** with a valid JSON object. Do not include any other text in your response.
              Use double quotes (") for all keys and string values, like this:
              {
@@ -156,17 +158,26 @@ class GenAISingleton:
             """
             We will use 2 LLM clients: One for LangGraph, and another for the final prompt -> RCA
             """
-            self.__langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
-                                                          api_key=GOOGLE_API_KEY)
+            langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
+                                                   api_key=GOOGLE_API_KEY)
             # Attach the tools to the model so that it knows what it can call
-            self.langgraph_tools = [self.lg_get_ne_details, self.lg_query_db, self.lg_get_cisco_ios_xr_interface_name]
-            self.__langgraph_llm_with_tools = self.__langgraph_llm.bind_tools(self.langgraph_tools)
+            langgraph_tools = [self.lg_get_ne_details, self.lg_query_db, self.lg_get_cisco_ios_xr_interface_name]
+            self.__langgraph_llm_with_tools = langgraph_llm.bind_tools(langgraph_tools)
             self.__build_graph()
             self.__nsp_client = nsp_client
             self.anonymizer = AnonymizerSingleton()
             self.__rag_client = RagSingleton(self)
 
-            self.__llm = genai.Client(api_key=GOOGLE_API_KEY)
+            rca_llm = genai.Client(api_key=GOOGLE_API_KEY)
+
+            """
+            Start the RCA chat. We will reuse this chat object for the lifetime of the agent so that the LLM
+            can recall/associate recent failures to previous/historical alarms
+            """
+            config = types.GenerateContentConfig(temperature=1.0,
+                                                 system_instruction=INSTRUCTIONS)
+            self.__rca_chat = rca_llm.chats.create(model="gemini-2.5-flash",
+                                                   config=config)
 
             self.__initialized = True
 
@@ -269,21 +280,14 @@ class GenAISingleton:
         self.__rca_langgraph = graph_builder.compile()
 
     def prompt_from_feed(self, alarms_feed) -> json:
-        # Start a chat
+        # Start a langgraph chat
         state = self.__rca_langgraph.invoke({"messages": ["alarms", alarms_feed]})
-
-        config = types.GenerateContentConfig(temperature=1.0,
-                                             system_instruction=INSTRUCTIONS)
-
-        # Start a chat with automatic function calling enabled.
-        chat = self.__llm.chats.create(model="gemini-2.5-flash",
-                                          config=config)
 
         final_prompt = f"{PROMPT}\n\n{alarms_feed}\n\nNE DETAILS + DOCS:\n{state['order']}"
         log.info(f"final_prompt: {final_prompt}")
 
-        # Invoke. Clean up the text string so that we return proper-JSON-format
-        return chat.send_message(final_prompt + alarms_feed).text.strip('`').replace('json', '', 1)
+        # Invoke the RCA chat. Clean up the text string so that we return proper-JSON-format
+        return self.__rca_chat.send_message(final_prompt).text.strip('`').replace('json', '', 1)
 
 
     def drain_queue(self):
