@@ -23,10 +23,12 @@ class NspClientSingleton:
 
     def __init__(self, server, username='admin', password='NokiaNsp1!'):
         if not self.initialized:
+            log.info("Initializing ...")
             self.server_url = f"https://{server}"
             self.username = username
             self.password = password
             self.token = None
+            self.refresh_token = None
             self.headers_dict = {
                 "Content-Type": "application/json"
             }
@@ -53,9 +55,41 @@ class NspClientSingleton:
 
         if response.status_code == 200:
             self.token = response.json().get("access_token")
+            self.refresh_token = response.json().get("refresh_token")
             self.token_expires_at_ux_time = response.json().get("expires_in") + time.time()
             self.headers_dict["Authorization"] = f"Bearer {self.token}"
-            log.debug(f"Access token: {self.token}")
+            log.debug(f"Access token: {self.token}, Refresh token: {self.refresh_token}")
+        else:
+            error_msg = f"Failed to get token: {response.status_code}, {response.text}"
+            log.critical(error_msg)
+            raise RuntimeError(error_msg)
+
+        return self.token
+
+    """
+    Refresh token
+    """
+    def refresh_auth_token(self) -> str:
+        url = f"{self.server_url}/rest-gateway/rest/api/v1/auth/token"
+
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token
+        }
+
+        response = requests.post(
+            url,
+            verify=False,  # Skip certificate verification
+            auth=HTTPBasicAuth(self.username, self.password),
+            headers=self.headers_dict,
+            json=data)
+
+        if response.status_code == 200:
+            self.token = response.json().get("access_token")
+            self.refresh_token = response.json().get("refresh_token")
+            self.token_expires_at_ux_time = response.json().get("expires_in") + time.time()
+            self.headers_dict["Authorization"] = f"Bearer {self.token}"
+            log.debug(f"Access token: {self.token}, Refresh token: {self.refresh_token}")
         else:
             error_msg = f"Failed to get token: {response.status_code}, {response.text}"
             log.critical(error_msg)
