@@ -2,8 +2,9 @@ import time
 from enum import Enum
 import logging
 from threading import Thread
+import yaml
 
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 
 log = logging.getLogger(__name__)
 
@@ -12,13 +13,15 @@ class SubscriptionState(Enum):
     DOWN = 2
 
 """
-Monitors the subscription state and expiry time.
+1. Instantiates subscription to NSP.
+2. Monitors the subscription state and expiry time.
+3. Renews token and subscription before expiry time.
 """
 class SubscriptionMonitorSingleton(Thread):
     __instance = None
     __initialized = False
 
-    check_subscription_interval = 900  # Every 15 minutes
+    check_subscription_interval = 1800  # Every 30 minutes
 
     def __new__(cls):
         if cls.__instance is None:
@@ -27,13 +30,22 @@ class SubscriptionMonitorSingleton(Thread):
 
     def __init__(self):
         if not self.__initialized:
+            log.info("Initializing ...")
             super().__init__()
             self.daemon = True
-            self.nsp_client = NspClientSingleton.instance
-            if self.nsp_client is None:
-                error_msg = "NSP client has not been initialized"
-                log.error(error_msg)
-                raise RuntimeError(error_msg)
+
+            # Load config file
+            with open('config/conf.yaml', 'r') as stream:
+                config = yaml.load(stream, Loader=yaml.FullLoader)
+
+            nsp_server_ip = config['nsp_server_ip']
+            self.nsp_client = self.initialize_nsp_client(nsp_server_ip)
+
+            subscr_details_dict = self.nsp_client.get_subscription_details()
+            # Save the topic_id to topic_id.txt for the kafka_client
+            log.info("Writing topic_id to config/topic_id.txt ...")
+            with open('config/topic_id.txt', 'w') as f:
+                f.write(subscr_details_dict['topic_id'])
 
             self.__initialized = True
 
@@ -41,7 +53,9 @@ class SubscriptionMonitorSingleton(Thread):
     Loop:
         1. Check the subscription state ('stage')
            * Report error if not 'ACTIVE' 
-        2. Renew the subscription
+        2. Renew:
+          a. Token ("refresh")
+          b. Subscription
         3. Sleep
     """
     def run(self):
@@ -53,10 +67,20 @@ class SubscriptionMonitorSingleton(Thread):
                 log.critical(error_msg)
                 raise RuntimeError(error_msg)
 
+            # Refresh the token
+            self.nsp_client.refresh_auth_token()
+
             # Renew the subscription
             self.nsp_client.renew_subscription()
 
             time.sleep(self.check_subscription_interval)
+
+    def initialize_nsp_client(self, nsp_server_ip) -> NspClient:
+        nsp_client = NspClient(server=nsp_server_ip)
+        nsp_client._authenticate()  # Get token
+        nsp_client.create_subscription()  # Subscribe to NSP-FAULT-YANG
+        return nsp_client
+
 
     def get_subscription_state(self) -> SubscriptionState:
         return SubscriptionState.DOWN
@@ -65,8 +89,5 @@ class SubscriptionMonitorSingleton(Thread):
 Test
 """
 if __name__ == '__main__':
-    nsp_c = NspClientSingleton(server='135.121.156.104')
-    nsp_c.authenticate()
-    nsp_c.create_subscription()
     subscription_monitor = SubscriptionMonitorSingleton()
     subscription_monitor.run()

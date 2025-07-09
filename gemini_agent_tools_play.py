@@ -1,18 +1,17 @@
 from google import genai
 from google.genai import types
 
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 from rag import RagSingleton
 
 GOOGLE_API_KEY='AIzaSyBx6vUjcxQheUOvVzUAnWE7ZzgqaqHqT7g'
 genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
-nsp_client = NspClientSingleton(server='135.121.156.104')
-nsp_client.authenticate()  # Get Token
+nsp_client = NspClient(server='135.121.156.104')
 rag_instance = RagSingleton(genai_client)
 
-tools = [NspClientSingleton.instance.get_l3vpn_interface_details,
-         NspClientSingleton.instance.get_ne_details,
+tools = [NspClient.get_l3vpn_interface_details,
+         NspClient.get_ne_details,
          RagSingleton.instance.query_db]
 
 instruction = """You are a helpful chatbot that can interact with NSP to retrieve details about network objects. 
