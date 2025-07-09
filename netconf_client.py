@@ -2,7 +2,7 @@ import logging
 import xmltodict
 
 from ncclient import manager
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 
 from redis_client import RedisClient
 
@@ -30,7 +30,7 @@ def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
 
 class Client:
     def __init__(self, ne_id, username, password):
-        mgmt_ip_addr = NspClientSingleton.instance.get_ne_details(ne_id)['mgmt_ip_addr']
+        mgmt_ip_addr = NspClient.get_ne_details(ne_id)['mgmt_ip_addr']
 
         self.ncClientManager = manager.connect(host=mgmt_ip_addr, port='830', username=username,
                                                password=password, hostkey_verify=False)
@@ -62,6 +62,5 @@ class Client:
 Test
 """
 if __name__ == "__main__":
-    my_nsp_client = NspClientSingleton(server='135.121.156.104')
-    my_nsp_client.authenticate()
+    my_nsp_client = NspClient(server='135.121.156.104')
     print(get_cisco_ios_xr_interface_name_fn('38.120.234.239', 16))

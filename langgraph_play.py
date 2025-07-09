@@ -1,4 +1,4 @@
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 from rag import RagSingleton
 
 from typing import Annotated, Literal, Any
@@ -132,8 +132,8 @@ def chatbot_with_tools(state: OrderState) -> OrderState:
 
 
 # Initialize nsp_client
-nsp_client = NspClientSingleton(server='135.121.156.104')
-nsp_client.authenticate()
+nsp_client = NspClient(server='135.121.156.104')
+nsp_client._authenticate()
 rag_client = RagSingleton()
 
 def tools_node(state: OrderState) -> OrderState:

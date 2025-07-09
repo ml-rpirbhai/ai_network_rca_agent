@@ -21,7 +21,7 @@ import time
 from anonymizer import AnonymizerSingleton
 import netconf_client
 from message_bus import MessageBus
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 from rag import RagSingleton
 
 # Suppress HTTPS warnings
@@ -135,12 +135,12 @@ class GenAISingleton:
     def lg_get_cisco_ios_xr_interface_name(ne_id: str, snmp_index: int) -> str:
         """For Cisco IOS-XR routers only. Given an interface SNMP ifindex, retrieves the interface name"""
 
-    def __new__(cls, nsp_client: NspClientSingleton):
+    def __new__(cls, nsp_client: NspClient):
         if cls.__instance is None:
             cls.__instance = super(GenAISingleton, cls).__new__(cls)
         return cls.__instance
 
-    def __init__(self, nsp_client: NspClientSingleton):
+    def __init__(self, nsp_client: NspClient):
         if not self.__initialized:
             print("Initializing gemini_alarms_rca_agent ...")
             log.info("Initializing ...")
@@ -351,7 +351,6 @@ class GenAISingleton:
         return f"🚨root_cause_fdns={[self.anonymizer.restore_anonymized_string(fdn) for fdn in json_response['root_cause_fdns']]}🚨\n💡reasoning={self.anonymizer.restore_anonymized_string(json_response['reasoning'])}💡"
 
 if __name__ == '__main__':
-    my_nsp_client = NspClientSingleton(server='135.121.156.104')
-    my_nsp_client.authenticate()  # Get Token
+    my_nsp_client = NspClient(server='135.121.156.104')
     gen_ai = GenAISingleton(my_nsp_client)
     gen_ai.prompt_bulk_from_queue()
