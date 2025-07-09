@@ -33,6 +33,9 @@ with open('config/ai_agent_logger.yaml', 'r') as stream:
     logging.config.dictConfig(logger_config)
     log = logging.getLogger(__name__)
 
+with open('config/conf.yaml', 'r') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
+
 """
 LangGraph LLM instructions
 """
@@ -146,9 +149,7 @@ class GenAISingleton:
         if not self.__initialized:
             print("Initializing gemini_alarms_rca_agent ...")
             log.info("Initializing ...")
-
-            with open('config/conf.yaml', 'r') as stream:
-                config = yaml.load(stream, Loader=yaml.FullLoader)
+            global config  # Tell interpreter to use outer config declaration
 
             # Initialize message-bus consumer
             bus = MessageBus.get_bus(config['message_bus_name'])
@@ -353,6 +354,8 @@ class GenAISingleton:
         return f"🚨root_cause_fdns={[self.anonymizer.restore_anonymized_string(fdn) for fdn in json_response['root_cause_fdns']]}🚨\n💡reasoning={self.anonymizer.restore_anonymized_string(json_response['reasoning'])}💡"
 
 if __name__ == '__main__':
-    my_nsp_client = NspClient(server='135.121.156.104')
+    my_nsp_client = NspClient(server=config['nsp']['ip'],
+                              username=config['nsp']['user'],
+                              password=config['nsp']['password'])
     gen_ai = GenAISingleton(my_nsp_client)
     gen_ai.prompt_bulk_from_queue()

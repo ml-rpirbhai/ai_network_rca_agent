@@ -9,7 +9,7 @@ handlers:
     formatter: simple
     filename: logs/kafka_client.log
     encoding: utf-8
-    maxBytes: 1000000000  # 1GB
+    maxBytes: 10000000  # 10MB
     backupCount: 1
 loggers:
   __main__:
