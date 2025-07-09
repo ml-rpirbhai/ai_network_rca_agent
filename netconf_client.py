@@ -6,8 +6,13 @@ from nsp_client import NspClient
 
 from redis_client import RedisClient
 
+# Suppress HTTPS warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 log = logging.getLogger(__name__)
 
+nsp_c = NspClient(server='135.121.156.104')
 redis_client = RedisClient()
 
 """
@@ -19,7 +24,7 @@ def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
     interface_name = redis_client.get_return_value('get_cisco_ios_xr_interface_name_fn', args)
 
     if interface_name is None:
-        nc_client = Client(ne_id, username='admin', password='Mainstreet5')
+        nc_client = NetconfClient(ne_id, username='admin', password='Mainstreet5')
         interface_name = nc_client.get_cisco_ios_xr_interface_name(snmp_index)
 
         # Store in redis
@@ -28,9 +33,9 @@ def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
     return interface_name
 
 
-class Client:
+class NetconfClient:
     def __init__(self, ne_id, username, password):
-        mgmt_ip_addr = NspClient.get_ne_details(ne_id)['mgmt_ip_addr']
+        mgmt_ip_addr = nsp_c.get_ne_details(ne_id)['mgmt_ip_addr']
 
         self.ncClientManager = manager.connect(host=mgmt_ip_addr, port='830', username=username,
                                                password=password, hostkey_verify=False)
@@ -62,5 +67,4 @@ class Client:
 Test
 """
 if __name__ == "__main__":
-    my_nsp_client = NspClient(server='135.121.156.104')
     print(get_cisco_ios_xr_interface_name_fn('38.120.234.239', 16))
