@@ -13,16 +13,17 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 with open('config/kafka_client_logger.yaml', 'r') as stream:
-    config = yaml.load(stream, Loader=yaml.FullLoader)
-    logging.config.dictConfig(config)
+    logger_config = yaml.load(stream, Loader=yaml.FullLoader)
+    logging.config.dictConfig(logger_config)
     log = logging.getLogger(__name__)
+
+with open('config/conf.yaml', 'r') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
 
 class KafkaClient:
     def __init__(self, nsp_client: NspClient):
         print("Initializing kafka_client ...")
         log.info("Initializing ...")
-        with open('config/conf.yaml', 'r') as stream:
-            config = yaml.load(stream, Loader=yaml.FullLoader)
 
         # Initialize message-bus producer
         bus = MessageBus.get_bus(config['message_bus_name'])
@@ -108,7 +109,9 @@ class KafkaClient:
             log.debug("Message did not meet filter criteria. Will not extract")
 
 if __name__ == '__main__':
-    my_nsp_client = NspClient(server='135.121.156.104')
+    my_nsp_client = NspClient(server=config['nsp']['ip'],
+                              username=config['nsp']['user'],
+                              password=config['nsp']['password'])
     my_nsp_client.create_subscription()
     client = KafkaClient(my_nsp_client)
     client.connect()
