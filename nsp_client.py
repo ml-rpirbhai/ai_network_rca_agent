@@ -268,8 +268,7 @@ class NspClient:
         if ne_details is not None:
             # Convert to dict to end applications
             ne_details = json.loads(ne_details)
-
-        if ne_details is None:
+        else:
             url = f"{self.server_url}/restconf/operations/nsp-inventory:find"
             data = f'{{"nsp-inventory:input": {{"xpath-filter": "/nsp-equipment:network/network-element[ne-id=\'{ne_id}\']", "depth": "2"}}}}'
 

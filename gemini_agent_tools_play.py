@@ -10,16 +10,16 @@ genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 nsp_client = NspClient(server='135.121.156.104')
 rag_instance = RagSingleton(genai_client)
 
-tools = [NspClient.get_l3vpn_interface_details,
-         NspClient.get_ne_details,
+tools = [nsp_client.get_l3vpn_interface_details,
+         nsp_client.get_ne_details,
          RagSingleton.instance.query_db]
 
 instruction = """You are a helpful chatbot that can interact with NSP to retrieve details about network objects. 
 You will take the user's questions and retrieve the required information using the tools available. 
 Once you have the information you need, you will answer the user's question using the data returned.
 
-Use NspClientSingleton.instance.get_l3vpn_interface_details to retrieve the port-parent and IP addresses of an L3VPN interface.
-Use NspClientSingleton.instance.get_ne_details to retrieve an NE instance's vendor, chassis and OS details.
+Use nsp_client.get_l3vpn_interface_details to retrieve the port-parent and IP addresses of an L3VPN interface.
+Use nsp_client.get_ne_details to retrieve an NE instance's vendor, chassis and OS details.
 Use RagSingleton.instance.query_db to retrieve useful references information about how to interpret an NE instance's vendor or OS type/version alarms: 
   Simply provide the vendor, OS type and version in the query (don't provide any other details)."""
 
