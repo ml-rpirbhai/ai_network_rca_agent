@@ -1,5 +1,8 @@
+import argparse
+from enum import Enum
 import json
 import logging.config
+
 import yaml
 
 from typing import Annotated, Literal, Any
@@ -35,6 +38,11 @@ with open('config/ai_agent_logger.yaml', 'r') as stream:
 
 with open('config/conf.yaml', 'r') as stream:
     config = yaml.load(stream, Loader=yaml.FullLoader)
+
+
+class ExecMode(Enum):
+    PROD = "prod"
+    TEST = "test"
 
 """
 LangGraph LLM instructions
@@ -140,7 +148,7 @@ class GenAISingleton:
     def lg_get_cisco_ios_xr_interface_name(ne_id: str, snmp_index: int) -> str:
         """For Cisco IOS-XR routers only. Given an interface SNMP ifindex, retrieves the interface name"""
 
-    def __new__(cls, nsp_client: NspClient):
+    def __new__(cls, nsp_client: NspClient, exec_mode: ExecMode = ExecMode.PROD):
         if cls.__instance is None:
             cls.__instance = super(GenAISingleton, cls).__new__(cls)
         return cls.__instance
@@ -149,6 +157,26 @@ class GenAISingleton:
         if not self.__initialized:
             print("Initializing gemini_alarms_rca_agent ...")
             log.info("Initializing ...")
+
+            self.exec_mode = ExecMode.PROD
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--exec_mode",
+                                type=str,
+                                default=ExecMode.PROD.value,
+                                choices=[ExecMode.PROD.value, ExecMode.TEST.value])
+            args = parser.parse_args()
+            exec_mode_val = args.exec_mode
+
+            if exec_mode_val == ExecMode.TEST.value:
+                self.exec_mode =  ExecMode.TEST
+            log.info(f"Running {exec_mode_val} mode")
+
+            if self.exec_mode == ExecMode.TEST:
+                # Load the test alarms
+                with open('config/test_alarms.txt', 'r') as f:
+                    test_alarms = f.read()
+                    self.test_alarms_list = test_alarms.split('\n')
+
             global config  # Tell interpreter to use outer config declaration
 
             # Initialize message-bus consumer
@@ -293,7 +321,7 @@ class GenAISingleton:
         return self.__rca_chat.send_message(final_prompt).text.strip('`').replace('json', '', 1)
 
 
-    def drain_queue(self):
+    def drain_queue(self) -> list:
         messages = None
         log.info("Checking for messages ...")
         try:
@@ -307,10 +335,22 @@ class GenAISingleton:
             return [message['message'] for message in messages]
 
     def prompt_bulk_from_queue(self):
-        while True:
+        keep_looping = True
+        while keep_looping:
             log.info("Waiting ...")
             time.sleep(5)
-            alarms_list = self.drain_queue()
+            if self.exec_mode == ExecMode.PROD:
+                alarms_list = self.drain_queue()
+            else:
+                if self.test_alarms_list is not None:
+                    alarms_list = self.test_alarms_list
+                    keep_looping = False
+                else:
+                    error_msg = "Must provide test_alarms_list[] in TEST mode"
+                    log.error(error_msg)
+                    raise RuntimeError(error_msg)
+
+
             if alarms_list is not None and len(alarms_list) > 0:
                 alarms_feed = '\n'.join(alarms_list)
                 print(alarms_feed)
