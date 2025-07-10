@@ -12,7 +12,7 @@ class RedisCache:
         value = self.client.get(key)
         return json.loads(value) if value else None
 
-    def get_keys(self) -> []:
+    def get_keys(self) -> list:
         return r.keys("*")
 
     def show_all(self):
