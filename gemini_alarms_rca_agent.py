@@ -29,6 +29,7 @@ from rag import RagSingleton
 
 # Suppress HTTPS warnings
 import urllib3
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 with open('config/ai_agent_logger.yaml', 'r') as stream:
@@ -39,15 +40,10 @@ with open('config/ai_agent_logger.yaml', 'r') as stream:
 with open('config/conf.yaml', 'r') as stream:
     config = yaml.load(stream, Loader=yaml.FullLoader)
 
-
-class ExecMode(Enum):
-    PROD = "prod"
-    TEST = "test"
-
 """
 LangGraph LLM instructions
 """
-SYSINT = ("system", # 'system' indicates the message is a system instruction.
+SYSINT = ("system",  # 'system' indicates the message is a system instruction.
           "You are the alarms details retrieval agent. Your task is to retrieve details and documentation "
           "for the alarms that have been sent to you. "
           "For each ne-id in the alarms feed: "
@@ -145,7 +141,7 @@ class GenAISingleton:
     def lg_get_cisco_ios_xr_interface_name(self, ne_id: str, snmp_index: int) -> str:
         """For Cisco IOS-XR routers only. Given an interface SNMP ifindex, retrieves the interface name"""
 
-    def __new__(cls, nsp_client: NspClient, exec_mode: ExecMode = ExecMode.PROD):
+    def __new__(cls, nsp_client: NspClient):
         if cls.__instance is None:
             cls.__instance = super(GenAISingleton, cls).__new__(cls)
         return cls.__instance
@@ -155,31 +151,11 @@ class GenAISingleton:
             print("Initializing gemini_alarms_rca_agent ...")
             log.info("Initializing ...")
 
-            self.exec_mode = ExecMode.PROD
-            parser = argparse.ArgumentParser()
-            parser.add_argument("--exec_mode",
-                                type=str,
-                                default=ExecMode.PROD.value,
-                                choices=[ExecMode.PROD.value, ExecMode.TEST.value])
-            args = parser.parse_args()
-            exec_mode_val = args.exec_mode
-
-            if exec_mode_val == ExecMode.TEST.value:
-                self.exec_mode =  ExecMode.TEST
-            log.info(f"Running {exec_mode_val} mode")
-
-            if self.exec_mode == ExecMode.TEST:
-                # Load the test alarms
-                with open('config/test_alarms.txt', 'r') as f:
-                    test_alarms = f.read()
-                    self.test_alarms_list = test_alarms.split('\n')
-
             global config  # Tell interpreter to use outer config declaration
 
             # Initialize message-bus consumer
             bus = MessageBus.get_bus(config['message_bus_name'])
             self.consumer = bus.instantiate_consumer('genai_alarms_consumer')
-
 
             GOOGLE_API_KEY = config['google_gemini_api_key']
 
@@ -326,17 +302,7 @@ class GenAISingleton:
         while keep_looping:
             log.info("Waiting ...")
             time.sleep(5)
-            if self.exec_mode == ExecMode.PROD:
-                alarms_list = self.drain_queue()
-            else:
-                if self.test_alarms_list is not None:
-                    alarms_list = self.test_alarms_list
-                    keep_looping = False
-                else:
-                    error_msg = "Must provide test_alarms_list[] in TEST mode"
-                    log.error(error_msg)
-                    raise RuntimeError(error_msg)
-
+            alarms_list = self.drain_queue()
 
             if alarms_list is not None and len(alarms_list) > 0:
                 alarms_feed = '\n'.join(alarms_list)
