@@ -1,0 +1,29 @@
+version: 1
+formatters:
+  simple:
+    format: '%(threadName)s %(asctime)s - %(levelname)s - %(name)s.%(funcName)s() - %(message)s'
+handlers:
+  file:
+    level: DEBUG
+    class: logging.handlers.RotatingFileHandler
+    formatter: simple
+    filename: logs/test_producer.log
+    encoding: utf-8
+    maxBytes: 10000000  # 10M
+    backupCount: 1
+loggers:
+  __main__:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  message_bus:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+  test_producer:
+    level: DEBUG
+    handlers: [file]
+    propagate: no
+root:
+  level: INFO
+  handlers: [file]
