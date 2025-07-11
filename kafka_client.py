@@ -6,23 +6,24 @@ import yaml
 
 from kafka import KafkaConsumer
 from message_bus import MessageBus
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
+
+# Suppress HTTPS warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 with open('config/kafka_client_logger.yaml', 'r') as stream:
-    config = yaml.load(stream, Loader=yaml.FullLoader)
-    logging.config.dictConfig(config)
+    logger_config = yaml.load(stream, Loader=yaml.FullLoader)
+    logging.config.dictConfig(logger_config)
     log = logging.getLogger(__name__)
 
-class Client:
-    def __init__(self, server, topic_id=None):
+with open('config/conf.yaml', 'r') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
+
+class KafkaClient:
+    def __init__(self, nsp_client: NspClient):
         print("Initializing kafka_client ...")
         log.info("Initializing ...")
-        with open('config/conf.yaml', 'r') as stream:
-            config = yaml.load(stream, Loader=yaml.FullLoader)
-
-        if topic_id is None:
-            with open('config/topic_id.txt', 'r') as stream:
-                topic_id = stream.readline()
 
         # Initialize message-bus producer
         bus = MessageBus.get_bus(config['message_bus_name'])
@@ -31,7 +32,7 @@ class Client:
         # Initialize Kafka
         ssl_context = ssl._create_unverified_context()
         consumer_config = {
-            'bootstrap_servers': server + ':9192',
+            'bootstrap_servers': nsp_client.server + ':9192',
             'security_protocol': 'SSL',
             'ssl_cafile': 'C:\\Users\\rpirbhai\\tls.crt',  # Specify ca-cert
             'ssl_context': ssl_context,
@@ -40,7 +41,12 @@ class Client:
         }
 
         # Create the consumer
-        self.nsp_kafka_consumer = KafkaConsumer(topic_id, **consumer_config)
+        if nsp_client.topic_id is not None:
+            self.nsp_kafka_consumer = KafkaConsumer(nsp_client.topic_id, **consumer_config)
+        else:
+            error_msg = f"topic_id is None. nsp_client subscription must be initiated first"
+            log.error(error_msg)
+            raise RuntimeError(error_msg)
 
     def connect(self):
         try:
@@ -67,7 +73,7 @@ class Client:
                         log.error(f"Unable to publish message. Payload is not dict: {published_message}")
 
         except KeyboardInterrupt:
-            log.critical("Consumer stopped.")
+            log.critical("Consumer stopped")
         finally:
             self.nsp_kafka_consumer.close()
 
@@ -103,5 +109,9 @@ class Client:
             log.debug("Message did not meet filter criteria. Will not extract")
 
 if __name__ == '__main__':
-    client = Client(server='135.121.156.104')
+    my_nsp_client = NspClient(server=config['nsp']['ip'],
+                              username=config['nsp']['user'],
+                              password=config['nsp']['password'])
+    my_nsp_client.create_subscription()
+    client = KafkaClient(my_nsp_client)
     client.connect()

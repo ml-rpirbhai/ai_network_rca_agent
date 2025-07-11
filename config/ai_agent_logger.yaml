@@ -9,7 +9,7 @@ handlers:
     formatter: simple
     filename: logs/gen_ai.log
     encoding: utf-8
-    maxBytes: 1000000000  # 1GB
+    maxBytes: 10000000  # 10M
     backupCount: 1
 loggers:
   __main__:

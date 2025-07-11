@@ -1,13 +1,24 @@
 import logging
 import xmltodict
+import yaml
 
 from ncclient import manager
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 
 from redis_client import RedisClient
 
+# Suppress HTTPS warnings
+import urllib3
+urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 log = logging.getLogger(__name__)
 
+with open('config/conf.yaml', 'r') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
+
+nsp_c = NspClient(server=config['nsp']['ip'],
+                  username=config['nsp']['user'],
+                  password=config['nsp']['password'])
 redis_client = RedisClient()
 
 """
@@ -19,7 +30,9 @@ def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
     interface_name = redis_client.get_return_value('get_cisco_ios_xr_interface_name_fn', args)
 
     if interface_name is None:
-        nc_client = Client(ne_id, username='admin', password='Mainstreet5')
+        nc_client = NetconfClient(ne_id,
+                                  username=config['nes']['default']['user'],
+                                  password=config['nes']['default']['password'])
         interface_name = nc_client.get_cisco_ios_xr_interface_name(snmp_index)
 
         # Store in redis
@@ -28,9 +41,9 @@ def get_cisco_ios_xr_interface_name_fn(ne_id:str, snmp_index:int) -> str:
     return interface_name
 
 
-class Client:
+class NetconfClient:
     def __init__(self, ne_id, username, password):
-        mgmt_ip_addr = NspClientSingleton.instance.get_ne_details(ne_id)['mgmt_ip_addr']
+        mgmt_ip_addr = nsp_c.get_ne_details(ne_id)['mgmt_ip_addr']
 
         self.ncClientManager = manager.connect(host=mgmt_ip_addr, port='830', username=username,
                                                password=password, hostkey_verify=False)
@@ -62,6 +75,4 @@ class Client:
 Test
 """
 if __name__ == "__main__":
-    my_nsp_client = NspClientSingleton(server='135.121.156.104')
-    my_nsp_client.authenticate()
     print(get_cisco_ios_xr_interface_name_fn('38.120.234.239', 16))

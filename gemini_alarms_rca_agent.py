@@ -1,5 +1,8 @@
+import argparse
+from enum import Enum
 import json
 import logging.config
+
 import yaml
 
 from typing import Annotated, Literal, Any
@@ -13,7 +16,7 @@ from langchain_core.messages.tool import ToolMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 
 import time
@@ -21,7 +24,7 @@ import time
 from anonymizer import AnonymizerSingleton
 import netconf_client
 from message_bus import MessageBus
-from nsp_client import NspClientSingleton
+from nsp_client import NspClient
 from rag import RagSingleton
 
 # Suppress HTTPS warnings
@@ -33,6 +36,14 @@ with open('config/ai_agent_logger.yaml', 'r') as stream:
     logging.config.dictConfig(logger_config)
     log = logging.getLogger(__name__)
 
+with open('config/conf.yaml', 'r') as stream:
+    config = yaml.load(stream, Loader=yaml.FullLoader)
+
+
+class ExecMode(Enum):
+    PROD = "prod"
+    TEST = "test"
+
 """
 LangGraph LLM instructions
 """
@@ -41,7 +52,9 @@ SYSINT = ("system", # 'system' indicates the message is a system instruction.
           "for the alarms that have been sent to you. "
           "For each ne-id in the alarms feed: "
           "1) Call lg_get_ne_details to get NE details (vendor, chassis-type, OS-version). Then: "
-          "2) Call lg_query_db with the vendor, chassis-type and OS-version to retrieve the reference documentation for that NE; "
+          "2) Call lg_query_db with the vendor, chassis-type and OS-version *values* (from lg_get_ne_details; "
+          "pass the vendor, chassis-type, OS-version *values* in order, and separated by a space: "
+          "no additional text!) to retrieve the reference documentation for that NE; "
           "lg_query_db may return None if there is no documentation for that particular NE vendor/chassis/OS. "
           "3) For interface alarms on Cisco IOS-XR: Call lg_get_cisco_ios_xr_interface_name to get the Cisco object associated with the SNMP ifIndex. "
           "Description of alarms (by column): time-detected | ne-name | ne-id | object-fdn | object-name | additional-info "
@@ -54,8 +67,10 @@ INSTRUCTIONS = ("""You are the network alarms RCA agent. Your task is to identif
              (or FDNs if there are multiple root-cause failures) from the list of alarms that have been sent to you.
              Respond with either the root-cause object-fdns or 'indeterminate'.
              The root-cause is 'indeterminate' if none of the alarms in the feed is a equipment failure or configuration error.
-             If there are multiple equipment failures and you cannot determine which one may be the root-cause, return multiple Object_FDNs.                         
-             Explain your reasoning. 
+             If there are multiple equipment failures and you cannot determine which one may be the root-cause, return multiple Object_FDNs. 
+             Use your memory to attribute a recent failure to an older root-cause (not more than 5 seconds prior). In other cases, 
+             the root-cause may be notified after its side-effects: This may be due to separate router processes notifying the failures.                         
+             Explain your reasoning.
              Respond **only** with a valid JSON object. Do not include any other text in your response.
              Use double quotes (") for all keys and string values, like this:
              {
@@ -108,9 +123,6 @@ class OrderState(TypedDict):
     # }
     order: Dict[str, Any]
 
-    # Flag indicating that the order is placed and completed.
-    finished: bool
-
 
 class GenAISingleton:
     __instance = None
@@ -122,29 +134,47 @@ class GenAISingleton:
     # schema, so empty functions have been defined that will be bound to the LLM
     # but their implementation is deferred to the order_node.
     @tool
-    def lg_get_ne_details(ne_id: str) -> {}:
+    def lg_get_ne_details(self, ne_id: str) -> dict:
         """Retrieves the NE instance vendor, chassis and OS"""
 
     @tool
-    def lg_query_db(query: str) -> str | None:
+    def lg_query_db(self, query: str) -> str | None:
         """Retrieves relevant reference documentation for an NE instance vendor/chassis/OS"""
 
     @tool
-    def lg_get_cisco_ios_xr_interface_name(ne_id: str, snmp_index: int) -> str:
+    def lg_get_cisco_ios_xr_interface_name(self, ne_id: str, snmp_index: int) -> str:
         """For Cisco IOS-XR routers only. Given an interface SNMP ifindex, retrieves the interface name"""
 
-    def __new__(cls, nsp_client: NspClientSingleton):
+    def __new__(cls, nsp_client: NspClient, exec_mode: ExecMode = ExecMode.PROD):
         if cls.__instance is None:
             cls.__instance = super(GenAISingleton, cls).__new__(cls)
         return cls.__instance
 
-    def __init__(self, nsp_client: NspClientSingleton):
+    def __init__(self, nsp_client: NspClient):
         if not self.__initialized:
             print("Initializing gemini_alarms_rca_agent ...")
             log.info("Initializing ...")
 
-            with open('config/conf.yaml', 'r') as stream:
-                config = yaml.load(stream, Loader=yaml.FullLoader)
+            self.exec_mode = ExecMode.PROD
+            parser = argparse.ArgumentParser()
+            parser.add_argument("--exec_mode",
+                                type=str,
+                                default=ExecMode.PROD.value,
+                                choices=[ExecMode.PROD.value, ExecMode.TEST.value])
+            args = parser.parse_args()
+            exec_mode_val = args.exec_mode
+
+            if exec_mode_val == ExecMode.TEST.value:
+                self.exec_mode =  ExecMode.TEST
+            log.info(f"Running {exec_mode_val} mode")
+
+            if self.exec_mode == ExecMode.TEST:
+                # Load the test alarms
+                with open('config/test_alarms.txt', 'r') as f:
+                    test_alarms = f.read()
+                    self.test_alarms_list = test_alarms.split('\n')
+
+            global config  # Tell interpreter to use outer config declaration
 
             # Initialize message-bus consumer
             bus = MessageBus.get_bus(config['message_bus_name'])
@@ -156,24 +186,33 @@ class GenAISingleton:
             """
             We will use 2 LLM clients: One for LangGraph, and another for the final prompt -> RCA
             """
-            self.__langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
-                                                          api_key=GOOGLE_API_KEY)
+            langgraph_llm = ChatGoogleGenerativeAI(model="gemini-2.5-flash",
+                                                   api_key=GOOGLE_API_KEY)
             # Attach the tools to the model so that it knows what it can call
-            self.langgraph_tools = [self.lg_get_ne_details, self.lg_query_db, self.lg_get_cisco_ios_xr_interface_name]
-            self.__langgraph_llm_with_tools = self.__langgraph_llm.bind_tools(self.langgraph_tools)
+            langgraph_tools = [self.lg_get_ne_details, self.lg_query_db, self.lg_get_cisco_ios_xr_interface_name]
+            self.__langgraph_llm_with_tools = langgraph_llm.bind_tools(langgraph_tools)
             self.__build_graph()
             self.__nsp_client = nsp_client
             self.anonymizer = AnonymizerSingleton()
             self.__rag_client = RagSingleton(self)
 
-            self.__llm = genai.Client(api_key=GOOGLE_API_KEY)
+            rca_llm = genai.Client(api_key=GOOGLE_API_KEY)
+
+            """
+            Start the RCA chat. We will reuse this chat object for the lifetime of the agent so that the LLM
+            can recall/associate recent failures to previous/historical alarms
+            """
+            config = types.GenerateContentConfig(temperature=1.0,
+                                                 system_instruction=INSTRUCTIONS)
+            self.__rca_chat = rca_llm.chats.create(model="gemini-2.5-flash",
+                                                   config=config)
 
             self.__initialized = True
 
     def __chatbot_with_tools(self, state: OrderState) -> OrderState:
         """The chatbot with tools. A simple wrapper around the model's own chat interface."""
         # Initialize the order
-        defaults = {"order": {"ne_details": {}, "references": {}}, "finished": False}
+        defaults = {"order": {"ne_details": {}, "references": {}}}
 
         new_output = self.__langgraph_llm_with_tools.invoke([SYSINT] + state["messages"])
 
@@ -186,7 +225,6 @@ class GenAISingleton:
         tool_msg = state.get("messages", [])[-1]
         order = state.get("order", {})
         outbound_msgs = []
-        flow_completed = False
 
         for tool_call in tool_msg.tool_calls:
             #Sleep for 1 sec to avoid hitting rate-limits on Gemini free-tier
@@ -206,24 +244,16 @@ class GenAISingleton:
                 response = self.__rag_client.query_db(query)
                 order["references"][query] = response
 
-                if response is None:
-                    flow_completed = True
-                #else:
-                    # Inject the RAG as a message Gemini can see in the next turn
-                #    outbound_msgs.append(
-                #        HumanMessage(content=f"NE documentation for {query}:\n{response}")
-                #    )
-
             elif tool_call["name"] == "lg_get_cisco_ios_xr_interface_name":
                 ne_id = tool_call["args"]["ne_id"]
                 snmp_index = int(tool_call["args"]["snmp_index"])  # Need to cast to int, because Gemini sends float
                 response = netconf_client.get_cisco_ios_xr_interface_name_fn(ne_id, snmp_index)
 
-                ifIndex_to_interface_name_map = {}
+                ne_details_map = order["ne_details"][ne_id]
+                # Get the ifIndex_to_interface_name_map if exists; else insert the key and default to {}
+                ifIndex_to_interface_name_map = ne_details_map.setdefault('ifIndex_to_interface_name', {})
                 ifIndex_to_interface_name_map[snmp_index] = response
-                order["ne_details"][ne_id]['ifIndex_to_interface_name'] = ifIndex_to_interface_name_map
 
-                flow_completed = True
 
             else:
                 raise NotImplementedError(f'Unknown tool call: {tool_call["name"]}')
@@ -237,8 +267,8 @@ class GenAISingleton:
                 )
             )
 
-        log.debug(f"messages: {outbound_msgs}, order: {order}, finished: {flow_completed}")
-        return {"messages": outbound_msgs, "order": order, "finished": flow_completed}
+        log.debug(f"messages: {outbound_msgs}, order: {json.dumps(order, indent=4)}")
+        return {"messages": outbound_msgs, "order": order}
 
     def __maybe_route_to_tools(self, state: OrderState) -> Literal["tools", "__end__"]:
         """Route from chatbot to tool nodes or exit"""
@@ -249,7 +279,7 @@ class GenAISingleton:
         msg = msgs[-1]
 
         # When the chatbot returns tool_calls, route to the "tools" node.
-        if hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0 and state.get("finished") is False:
+        if hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0:
             return "tools"
         else:
             return END
@@ -269,24 +299,16 @@ class GenAISingleton:
         self.__rca_langgraph = graph_builder.compile()
 
     def prompt_from_feed(self, alarms_feed) -> json:
-        # Start a chat
+        # Start a langgraph chat
         state = self.__rca_langgraph.invoke({"messages": ["alarms", alarms_feed]})
-
-        config = types.GenerateContentConfig(temperature=1.0,
-                                             system_instruction=INSTRUCTIONS)
-
-        # Start a chat with automatic function calling enabled.
-        chat = self.__llm.chats.create(model="gemini-2.5-flash",
-                                          config=config)
 
         final_prompt = f"{PROMPT}\n\n{alarms_feed}\n\nNE DETAILS + DOCS:\n{state['order']}"
         log.info(f"final_prompt: {final_prompt}")
 
-        # Invoke. Clean up the text string so that we return proper-JSON-format
-        return chat.send_message(final_prompt + alarms_feed).text.strip('`').replace('json', '', 1)
+        # Invoke the RCA chat. Clean up the text string so that we return proper-JSON-format
+        return self.__rca_chat.send_message(final_prompt).text.strip('`').replace('json', '', 1)
 
-
-    def drain_queue(self):
+    def drain_queue(self) -> list:
         messages = None
         log.info("Checking for messages ...")
         try:
@@ -300,10 +322,22 @@ class GenAISingleton:
             return [message['message'] for message in messages]
 
     def prompt_bulk_from_queue(self):
-        while True:
+        keep_looping = True
+        while keep_looping:
             log.info("Waiting ...")
             time.sleep(5)
-            alarms_list = self.drain_queue()
+            if self.exec_mode == ExecMode.PROD:
+                alarms_list = self.drain_queue()
+            else:
+                if self.test_alarms_list is not None:
+                    alarms_list = self.test_alarms_list
+                    keep_looping = False
+                else:
+                    error_msg = "Must provide test_alarms_list[] in TEST mode"
+                    log.error(error_msg)
+                    raise RuntimeError(error_msg)
+
+
             if alarms_list is not None and len(alarms_list) > 0:
                 alarms_feed = '\n'.join(alarms_list)
                 print(alarms_feed)
@@ -347,7 +381,8 @@ class GenAISingleton:
         return f"🚨root_cause_fdns={[self.anonymizer.restore_anonymized_string(fdn) for fdn in json_response['root_cause_fdns']]}🚨\n💡reasoning={self.anonymizer.restore_anonymized_string(json_response['reasoning'])}💡"
 
 if __name__ == '__main__':
-    my_nsp_client = NspClientSingleton(server='135.121.156.104')
-    my_nsp_client.authenticate()  # Get Token
+    my_nsp_client = NspClient(server=config['nsp']['ip'],
+                              username=config['nsp']['user'],
+                              password=config['nsp']['password'])
     gen_ai = GenAISingleton(my_nsp_client)
     gen_ai.prompt_bulk_from_queue()

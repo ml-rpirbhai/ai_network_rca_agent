@@ -1,3 +1,5 @@
+import threading
+
 import requests
 from requests.auth import HTTPBasicAuth
 
@@ -9,35 +11,59 @@ import time
 
 from redis_client import RedisClient
 
-
 log = logging.getLogger(__name__)
 
-class NspClientSingleton:
-    instance = None
-    initialized = False
-
-    def __new__(cls, server, username='admin', password='NokiaNsp1!'):
-        if cls.instance is None:
-            cls.instance = super(NspClientSingleton, cls).__new__(cls)
-        return cls.instance
+class NspClient:
+    _MONITOR_INTERVAL_SEC = 1800  # Every 30 minutes
 
     def __init__(self, server, username='admin', password='NokiaNsp1!'):
-        if not self.initialized:
-            self.server_url = f"https://{server}"
-            self.username = username
-            self.password = password
-            self.token = None
-            self.headers_dict = {
-                "Content-Type": "application/json"
-            }
-            self.subscription_id = None
-            self.redis_client = RedisClient()
-            self.initialized = True
+        log.info("Initializing ...")
+
+        self.server = server
+        self.server_url = f"https://{server}"
+        self.username = username
+        self.password = password
+        self.token = None
+        self.refresh_token = None
+        self.token_expires_at_ux_time = 0
+        self.topic_id = None
+        self.headers_dict = {
+            "Content-Type": "application/json"
+        }
+        self.subscription_id = None
+        self.redis_client = RedisClient()
+
+        self._authenticate()
+        self._start_monitor_thread()
+
+    def _start_monitor_thread(self):
+        log.info("Starting daemon ...")
+        self._monitor_thread = threading.Thread(target=self._monitor, daemon=True)
+        self._monitor_thread.start()
+
+    def _monitor(self):
+        while True:
+            # Refresh the token
+            log.info("Refreshing token ...")
+            self.refresh_auth_token()
+
+            if self.subscription_id is not None:
+                subscription_details_dict = self.get_subscription_details()
+                if 'stage' in subscription_details_dict and subscription_details_dict['stage'] != "ACTIVE":
+                    error_msg = "Subscription is not ACTIVE"
+                    log.critical(error_msg)
+                    raise RuntimeError(error_msg)
+
+                # Renew the subscription
+                log.info("Refreshing subscription ...")
+                self.renew_subscription()
+
+            time.sleep(NspClient._MONITOR_INTERVAL_SEC)
 
     """
     Get token
     """
-    def authenticate(self) -> str:
+    def _authenticate(self):
         url = f"{self.server_url}/rest-gateway/rest/api/v1/auth/token"
 
         data = {
@@ -53,9 +79,39 @@ class NspClientSingleton:
 
         if response.status_code == 200:
             self.token = response.json().get("access_token")
+            self.refresh_token = response.json().get("refresh_token")
             self.token_expires_at_ux_time = response.json().get("expires_in") + time.time()
             self.headers_dict["Authorization"] = f"Bearer {self.token}"
-            log.debug(f"Access token: {self.token}")
+            log.debug(f"Access token: {self.token}, Refresh token: {self.refresh_token}")
+        else:
+            error_msg = f"Failed to get token: {response.status_code}, {response.text}"
+            log.critical(error_msg)
+            raise RuntimeError(error_msg)
+
+    """
+    Refresh token
+    """
+    def refresh_auth_token(self) -> str:
+        url = f"{self.server_url}/rest-gateway/rest/api/v1/auth/token"
+
+        data = {
+            "grant_type": "refresh_token",
+            "refresh_token": self.refresh_token
+        }
+
+        response = requests.post(
+            url,
+            verify=False,  # Skip certificate verification
+            auth=HTTPBasicAuth(self.username, self.password),
+            headers=self.headers_dict,
+            json=data)
+
+        if response.status_code == 200:
+            self.token = response.json().get("access_token")
+            self.refresh_token = response.json().get("refresh_token")
+            self.token_expires_at_ux_time = response.json().get("expires_in") + time.time()
+            self.headers_dict["Authorization"] = f"Bearer {self.token}"
+            log.debug(f"Access token: {self.token}, Refresh token: {self.refresh_token}")
         else:
             error_msg = f"Failed to get token: {response.status_code}, {response.text}"
             log.critical(error_msg)
@@ -65,14 +121,11 @@ class NspClientSingleton:
 
     """
     Create subscription
-    Params: token: If left as None, use self.token
     """
-    def create_subscription(self, token=None) -> None:
+    def create_subscription(self) -> None:
         url = f"{self.server_url}/nbi-notification/api/v1/notifications/subscriptions"
         headers_dict = self.headers_dict
-        if token != None:  # For testing purpose only
-            self.token = token
-            headers_dict["Authorization"] = f"Bearer {self.token}"
+        headers_dict["Authorization"] = f"Bearer {self.token}"
 
         # Subscription filter
         data = {
@@ -92,9 +145,11 @@ class NspClientSingleton:
         if response.status_code == 201:
             log.debug(f"Response: {response.text}")
             json_response = json.loads(response.text)
+            log.debug(json_response)
             json_response_data = json_response['response']['data']
             self.subscription_id = json_response_data['subscriptionId']
-            log.debug(f"subscriptionId: {self.subscription_id}, stage: {json_response_data['stage']}, expiresAt: {json_response_data['expiresAt']}")
+            self.topic_id = json_response_data['topicId']
+
         else:
             error_msg = f"Failed: {response.status_code}, {response.text}"
             log.critical(error_msg)
@@ -213,8 +268,7 @@ class NspClientSingleton:
         if ne_details is not None:
             # Convert to dict to end applications
             ne_details = json.loads(ne_details)
-
-        if ne_details is None:
+        else:
             url = f"{self.server_url}/restconf/operations/nsp-inventory:find"
             data = f'{{"nsp-inventory:input": {{"xpath-filter": "/nsp-equipment:network/network-element[ne-id=\'{ne_id}\']", "depth": "2"}}}}'
 
@@ -261,8 +315,7 @@ class NspClientSingleton:
 Test
 """
 if __name__ == '__main__':
-    nsp_client = NspClientSingleton(server='135.121.156.104')
-    nsp_client.authenticate()  # Get Token
+    nsp_client = NspClient(server='135.121.156.104')
     print(nsp_client.get_ne_details('38.120.234.239'))
 
 

@@ -1,3 +1,10 @@
 google_gemini_api_key: '***REMOVED***'
 message_bus_name: 'alarms_bus'
-nsp_server_ip: '135.121.156.104'
+nsp:
+  ip: '135.121.156.104'
+  user: 'admin'
+  password: 'NokiaNsp1!'
+nes:
+  'default':
+    user: 'admin'
+    password: 'Mainstreet5'
