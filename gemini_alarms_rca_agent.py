@@ -16,7 +16,7 @@ from langchain_core.messages.tool import ToolMessage
 from langchain_core.tools import tool
 from langchain_google_genai import ChatGoogleGenerativeAI
 
-from langgraph.graph import StateGraph, START, END
+from langgraph.graph import StateGraph, END
 from langgraph.graph.message import add_messages
 
 import time
@@ -123,9 +123,6 @@ class OrderState(TypedDict):
     # }
     order: Dict[str, Any]
 
-    # Flag indicating that the order is placed and completed.
-    finished: bool
-
 
 class GenAISingleton:
     __instance = None
@@ -137,15 +134,15 @@ class GenAISingleton:
     # schema, so empty functions have been defined that will be bound to the LLM
     # but their implementation is deferred to the order_node.
     @tool
-    def lg_get_ne_details(ne_id: str) -> {}:
+    def lg_get_ne_details(self, ne_id: str) -> dict:
         """Retrieves the NE instance vendor, chassis and OS"""
 
     @tool
-    def lg_query_db(query: str) -> str | None:
+    def lg_query_db(self, query: str) -> str | None:
         """Retrieves relevant reference documentation for an NE instance vendor/chassis/OS"""
 
     @tool
-    def lg_get_cisco_ios_xr_interface_name(ne_id: str, snmp_index: int) -> str:
+    def lg_get_cisco_ios_xr_interface_name(self, ne_id: str, snmp_index: int) -> str:
         """For Cisco IOS-XR routers only. Given an interface SNMP ifindex, retrieves the interface name"""
 
     def __new__(cls, nsp_client: NspClient, exec_mode: ExecMode = ExecMode.PROD):
@@ -215,7 +212,7 @@ class GenAISingleton:
     def __chatbot_with_tools(self, state: OrderState) -> OrderState:
         """The chatbot with tools. A simple wrapper around the model's own chat interface."""
         # Initialize the order
-        defaults = {"order": {"ne_details": {}, "references": {}}, "finished": False}
+        defaults = {"order": {"ne_details": {}, "references": {}}}
 
         new_output = self.__langgraph_llm_with_tools.invoke([SYSINT] + state["messages"])
 
@@ -228,7 +225,6 @@ class GenAISingleton:
         tool_msg = state.get("messages", [])[-1]
         order = state.get("order", {})
         outbound_msgs = []
-        flow_completed = False
 
         for tool_call in tool_msg.tool_calls:
             #Sleep for 1 sec to avoid hitting rate-limits on Gemini free-tier
@@ -248,24 +244,16 @@ class GenAISingleton:
                 response = self.__rag_client.query_db(query)
                 order["references"][query] = response
 
-                if response is None:
-                    flow_completed = True
-                #else:
-                    # Inject the RAG as a message Gemini can see in the next turn
-                #    outbound_msgs.append(
-                #        HumanMessage(content=f"NE documentation for {query}:\n{response}")
-                #    )
-
             elif tool_call["name"] == "lg_get_cisco_ios_xr_interface_name":
                 ne_id = tool_call["args"]["ne_id"]
                 snmp_index = int(tool_call["args"]["snmp_index"])  # Need to cast to int, because Gemini sends float
                 response = netconf_client.get_cisco_ios_xr_interface_name_fn(ne_id, snmp_index)
 
-                ifIndex_to_interface_name_map = {}
+                ne_details_map = order["ne_details"][ne_id]
+                # Get the ifIndex_to_interface_name_map if exists; else insert the key and default to {}
+                ifIndex_to_interface_name_map = ne_details_map.setdefault('ifIndex_to_interface_name', {})
                 ifIndex_to_interface_name_map[snmp_index] = response
-                order["ne_details"][ne_id]['ifIndex_to_interface_name'] = ifIndex_to_interface_name_map
 
-                flow_completed = True
 
             else:
                 raise NotImplementedError(f'Unknown tool call: {tool_call["name"]}')
@@ -279,8 +267,8 @@ class GenAISingleton:
                 )
             )
 
-        log.debug(f"messages: {outbound_msgs}, order: {order}, finished: {flow_completed}")
-        return {"messages": outbound_msgs, "order": order, "finished": flow_completed}
+        log.debug(f"messages: {outbound_msgs}, order: {json.dumps(order, indent=4)}")
+        return {"messages": outbound_msgs, "order": order}
 
     def __maybe_route_to_tools(self, state: OrderState) -> Literal["tools", "__end__"]:
         """Route from chatbot to tool nodes or exit"""
@@ -291,7 +279,7 @@ class GenAISingleton:
         msg = msgs[-1]
 
         # When the chatbot returns tool_calls, route to the "tools" node.
-        if hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0 and state.get("finished") is False:
+        if hasattr(msg, "tool_calls") and len(msg.tool_calls) > 0:
             return "tools"
         else:
             return END
@@ -319,7 +307,6 @@ class GenAISingleton:
 
         # Invoke the RCA chat. Clean up the text string so that we return proper-JSON-format
         return self.__rca_chat.send_message(final_prompt).text.strip('`').replace('json', '', 1)
-
 
     def drain_queue(self) -> list:
         messages = None
