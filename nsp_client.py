@@ -9,12 +9,14 @@ import logging
 import pytz
 import time
 
+from anonymizer import AnonymizerSingleton
 from redis_client import RedisClient
 
 log = logging.getLogger(__name__)
 
 class NspClient:
     _MONITOR_INTERVAL_SEC = 1800  # Every 30 minutes
+    anonymizer = AnonymizerSingleton()
 
     def __init__(self, server, username='admin', password='NokiaNsp1!'):
         log.info("Initializing ...")
@@ -261,6 +263,7 @@ class NspClient:
     """
     * Called by Gemini Agent *
     """
+    #@anonymizer.restore_then_reanonymize
     def get_ne_details(self, ne_id: str) -> dict:
         args = [ne_id]
         # Check redis
@@ -315,7 +318,7 @@ class NspClient:
 Test
 """
 if __name__ == '__main__':
-    nsp_client = NspClient(server='135.121.156.104')
-    print(nsp_client.get_ne_details('38.120.234.239'))
+    my_nsp_client = NspClient(server='135.121.156.104')
+    print(my_nsp_client.get_ne_details('38.120.234.239'))
 
 
