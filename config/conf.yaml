@@ -1,4 +1,4 @@
-google_gemini_api_key: '***REMOVED***'
+google_gemini_api_key: ''
 message_bus_name: 'alarms_bus'
 nsp:
   ip: '135.121.156.104'
