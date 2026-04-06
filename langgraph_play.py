@@ -22,7 +22,7 @@ import matplotlib.pyplot as plt
 from pprint import pprint
 
 
-GOOGLE_API_KEY='***REMOVED***'
+GOOGLE_API_KEY=''
 
 
 class OrderState(TypedDict):
