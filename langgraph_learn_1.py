@@ -17,7 +17,7 @@ from PIL import Image
 import io
 import matplotlib.pyplot as plt
 
-GOOGLE_API_KEY='***REMOVED***'
+GOOGLE_API_KEY=''
 
 class OrderState(TypedDict):
     """State representing the customer's order conversation."""
