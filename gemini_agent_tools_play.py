@@ -4,7 +4,7 @@ from google.genai import types
 from nsp_client import NspClient
 from rag import RagSingleton
 
-GOOGLE_API_KEY='***REMOVED***'
+GOOGLE_API_KEY=''
 genai_client = genai.Client(api_key=GOOGLE_API_KEY)
 
 nsp_client = NspClient(server='135.121.156.104')
